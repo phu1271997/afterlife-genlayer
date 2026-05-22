@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useState } from "react";
 import { ArrowRight, HandCoins, ScrollText } from "lucide-react";
 
 import { AssetAllocation } from "@/components/AssetAllocation";
@@ -16,7 +17,20 @@ export default function ClaimPage({
 }) {
   const wills = useAfterLifeStore((state) => state.wills);
   const executeWill = useAfterLifeStore((state) => state.executeWill);
+  const loadWillById = useAfterLifeStore((state) => state.loadWillById);
+  const isConnected = useAfterLifeStore((state) => state.isConnected);
+  const [error, setError] = useState<string | null>(null);
+  const [isExecuting, setIsExecuting] = useState(false);
   const will = wills.find((entry) => entry.id === params.will_id);
+
+  useEffect(() => {
+    if (!isConnected) {
+      return;
+    }
+    loadWillById(params.will_id).catch((nextError) => {
+      setError(nextError instanceof Error ? nextError.message : "Unable to load will.");
+    });
+  }, [isConnected, loadWillById, params.will_id]);
 
   if (!will) {
     return (
@@ -39,6 +53,12 @@ export default function ClaimPage({
             AfterLife waits until the grace period is earned. Only then does the protocol permit execution.
           </p>
         </div>
+
+        {error ? (
+          <div className="rounded-[1.5rem] border border-alert/35 bg-alert/15 p-4 text-sm text-rose-100">
+            {error}
+          </div>
+        ) : null}
 
         <div className="grid gap-6 lg:grid-cols-[1.05fr_0.95fr]">
           <Card className="space-y-6">
@@ -70,7 +90,21 @@ export default function ClaimPage({
             </div>
 
             {will.status !== "EXECUTED" ? (
-              <Button size="lg" onClick={() => executeWill(will.id)}>
+              <Button
+                size="lg"
+                disabled={isExecuting}
+                onClick={async () => {
+                  try {
+                    setError(null);
+                    setIsExecuting(true);
+                    await executeWill(will.id);
+                  } catch (nextError) {
+                    setError(nextError instanceof Error ? nextError.message : "Unable to execute will.");
+                  } finally {
+                    setIsExecuting(false);
+                  }
+                }}
+              >
                 Execute Will
               </Button>
             ) : (

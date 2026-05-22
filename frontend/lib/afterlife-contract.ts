@@ -1,0 +1,179 @@
+"use client";
+
+import { ExecutionResult, TransactionStatus, type Address, type Hash } from "genlayer-js/types";
+
+import type { CreateWillInput } from "@/lib/store";
+import {
+  AFTERLIFE_CONTRACT_ADDRESS,
+  connectGenLayerWallet,
+  createReadClient,
+} from "@/lib/genlayer";
+
+export interface OnChainWillState {
+  id: string;
+  owner_address: string;
+  owner_full_name: string;
+  owner_birth_year: number;
+  owner_city: string;
+  check_in_interval_days: number;
+  beneficiaries: Array<{ address: string; name: string; share: number }>;
+  digital_assets: unknown[];
+  social_links: string[];
+  status: string;
+  last_check_in_block: number;
+  check_ins_count: number;
+  death_verdict: string;
+  death_confidence: number;
+  death_evidence: string[];
+  death_red_flags?: string[];
+  death_reasoning: string;
+  estimated_death_date?: string;
+  verification_triggered_by: string;
+  grace_period_started_block: number;
+  executed_block: number;
+  fee_paid: number;
+  will_number: number;
+}
+
+async function waitForSuccessfulWrite(txHash: `0x${string}`) {
+  const readClient = createReadClient();
+  const receipt = await readClient.waitForTransactionReceipt({
+    hash: txHash as Hash,
+    status: TransactionStatus.FINALIZED,
+    interval: 3_000,
+    retries: 120,
+  });
+
+  if (receipt.txExecutionResultName !== ExecutionResult.FINISHED_WITH_RETURN) {
+    throw new Error("The transaction finalized, but contract execution did not succeed.");
+  }
+
+  return receipt;
+}
+
+export async function readBalance(address: string) {
+  const readClient = createReadClient();
+  const result = await readClient.readContract({
+    address: AFTERLIFE_CONTRACT_ADDRESS,
+    functionName: "get_balance",
+    args: [address],
+  });
+  return Number(result ?? 0);
+}
+
+export async function readUserWillId(address: string) {
+  const readClient = createReadClient();
+  const result = await readClient.readContract({
+    address: AFTERLIFE_CONTRACT_ADDRESS,
+    functionName: "get_user_will_id",
+    args: [address],
+  });
+  return String(result ?? "");
+}
+
+export async function readWill(willId: string) {
+  const readClient = createReadClient();
+  const raw = await readClient.readContract({
+    address: AFTERLIFE_CONTRACT_ADDRESS,
+    functionName: "get_will",
+    args: [willId],
+  });
+  return JSON.parse(String(raw)) as OnChainWillState;
+}
+
+export async function claimStarterTokensOnChain() {
+  const { client } = await connectGenLayerWallet();
+  const txHash = await client.writeContract({
+    address: AFTERLIFE_CONTRACT_ADDRESS,
+    functionName: "claim_starter_tokens",
+    args: [],
+    value: BigInt(0),
+  });
+  await waitForSuccessfulWrite(txHash);
+}
+
+export async function createWillOnChain(input: CreateWillInput) {
+  const { client, address } = await connectGenLayerWallet();
+  const willId = `AL-${Date.now().toString().slice(-8)}`;
+
+  const txHash = await client.writeContract({
+    address: AFTERLIFE_CONTRACT_ADDRESS,
+    functionName: "create_will",
+    args: [
+      willId,
+      input.ownerName,
+      input.ownerBirthYear,
+      input.ownerCity,
+      input.cadenceDays,
+      JSON.stringify(
+        input.beneficiaries.map((beneficiary) => ({
+          address: beneficiary.address,
+          name: beneficiary.name,
+          share: beneficiary.share,
+        })),
+      ),
+      JSON.stringify(input.assets),
+      JSON.stringify(input.socialLinks),
+    ],
+    value: BigInt(0),
+  });
+
+  await waitForSuccessfulWrite(txHash);
+
+  for (const message of input.finalMessages) {
+    const messageHash = await client.writeContract({
+      address: AFTERLIFE_CONTRACT_ADDRESS,
+      functionName: "add_final_message",
+      args: [
+        willId,
+        message.recipientAddress,
+        message.body,
+        message.mediaUrl ?? "",
+      ],
+      value: BigInt(0),
+    });
+    await waitForSuccessfulWrite(messageHash);
+  }
+
+  return {
+    willId,
+    ownerAddress: address,
+  };
+}
+
+export async function proofOfLifeOnChain(willId: string) {
+  const { client } = await connectGenLayerWallet();
+  const txHash = await client.writeContract({
+    address: AFTERLIFE_CONTRACT_ADDRESS,
+    functionName: "proof_of_life",
+    args: [willId],
+    value: BigInt(0),
+  });
+  await waitForSuccessfulWrite(txHash);
+}
+
+export async function triggerDeathVerificationOnChain(willId: string, obituaryUrl: string) {
+  const { client } = await connectGenLayerWallet();
+  const txHash = await client.writeContract({
+    address: AFTERLIFE_CONTRACT_ADDRESS,
+    functionName: "trigger_death_verification",
+    args: [willId, obituaryUrl],
+    value: BigInt(0),
+  });
+  await waitForSuccessfulWrite(txHash);
+}
+
+export async function executeWillOnChain(willId: string) {
+  const { client } = await connectGenLayerWallet();
+  const txHash = await client.writeContract({
+    address: AFTERLIFE_CONTRACT_ADDRESS,
+    functionName: "execute_will",
+    args: [willId],
+    value: BigInt(0),
+  });
+  await waitForSuccessfulWrite(txHash);
+}
+
+export function getContractAddress() {
+  return AFTERLIFE_CONTRACT_ADDRESS as Address;
+}

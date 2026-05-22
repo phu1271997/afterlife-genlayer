@@ -2,13 +2,42 @@
 
 import Link from "next/link";
 import { HeartHandshake, ShieldCheck } from "lucide-react";
+import { useState } from "react";
 
+import { Button } from "@/components/ui/button";
 import { useAfterLifeStore } from "@/lib/store";
 import { shortenAddress } from "@/lib/utils";
 
 export function Navbar() {
   const balance = useAfterLifeStore((state) => state.balance);
   const address = useAfterLifeStore((state) => state.userAddress);
+  const isConnected = useAfterLifeStore((state) => state.isConnected);
+  const isWorking = useAfterLifeStore((state) => state.isWorking);
+  const connectWallet = useAfterLifeStore((state) => state.connectWallet);
+  const claimStarterTokens = useAfterLifeStore((state) => state.claimStarterTokens);
+  const [isPending, setIsPending] = useState(false);
+
+  async function handleConnect() {
+    try {
+      setIsPending(true);
+      await connectWallet();
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "Wallet connection failed.");
+    } finally {
+      setIsPending(false);
+    }
+  }
+
+  async function handleClaim() {
+    try {
+      setIsPending(true);
+      await claimStarterTokens();
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "Starter token claim failed.");
+    } finally {
+      setIsPending(false);
+    }
+  }
 
   return (
     <header className="sticky top-0 z-40 border-b border-white/5 bg-midnight/70 backdrop-blur-xl">
@@ -42,11 +71,24 @@ export function Navbar() {
           </Link>
         </nav>
 
-        <div className="flex items-center gap-3 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-xs text-white/70">
-          <HeartHandshake className="h-4 w-4 text-gold" />
-          <span>{balance} LIFE</span>
-          <span className="hidden text-white/40 md:inline">{shortenAddress(address)}</span>
-        </div>
+        {isConnected ? (
+          <div className="flex items-center gap-3">
+            {balance === 0 ? (
+              <Button variant="secondary" size="sm" onClick={handleClaim} disabled={isPending || isWorking}>
+                Claim 200 LIFE
+              </Button>
+            ) : null}
+            <div className="flex items-center gap-3 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-xs text-white/70">
+              <HeartHandshake className="h-4 w-4 text-gold" />
+              <span>{balance} LIFE</span>
+              <span className="hidden text-white/40 md:inline">{shortenAddress(address)}</span>
+            </div>
+          </div>
+        ) : (
+          <Button variant="secondary" size="sm" onClick={handleConnect} disabled={isPending || isWorking}>
+            Connect Wallet
+          </Button>
+        )}
       </div>
     </header>
   );

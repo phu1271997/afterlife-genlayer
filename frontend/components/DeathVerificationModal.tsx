@@ -77,15 +77,17 @@ export function DeathVerificationModal({
   willTitle: string;
   obituaryUrl: string;
   onClose: () => void;
-  onComplete: () => Result;
+  onComplete: () => Result | Promise<Result>;
 }) {
   const [stageIndex, setStageIndex] = useState(0);
   const [result, setResult] = useState<Result | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isOpen) {
       setStageIndex(0);
       setResult(null);
+      setError(null);
       return;
     }
 
@@ -93,7 +95,17 @@ export function DeathVerificationModal({
       window.setTimeout(() => {
         setStageIndex(index);
         if (index === stages.length - 1) {
-          setResult(onComplete());
+          Promise.resolve(onComplete())
+            .then((nextResult) => {
+              setResult(nextResult);
+            })
+            .catch((nextError) => {
+              setError(
+                nextError instanceof Error
+                  ? nextError.message
+                  : "The verification transaction could not be completed.",
+              );
+            });
         }
       }, index * 1600),
     );
@@ -185,6 +197,17 @@ export function DeathVerificationModal({
                     </div>
                     <p className="mt-2 text-sm text-white/60">{activeStage.detail}</p>
                   </div>
+
+                  {error ? (
+                    <motion.div
+                      initial={{ opacity: 0, y: 18 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="mt-8 rounded-[1.75rem] border border-alert/40 bg-alert/20 p-6 text-rose-50"
+                    >
+                      <div className="font-display text-3xl">Verification could not be completed.</div>
+                      <p className="mt-3 text-sm leading-7 text-rose-100/85">{error}</p>
+                    </motion.div>
+                  ) : null}
 
                   {result ? (
                     <motion.div

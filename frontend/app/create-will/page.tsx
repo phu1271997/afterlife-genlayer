@@ -26,9 +26,11 @@ const steps = [
 export default function CreateWillPage() {
   const router = useRouter();
   const createWill = useAfterLifeStore((state) => state.createWill);
+  const isConnected = useAfterLifeStore((state) => state.isConnected);
 
   const [step, setStep] = useState(0);
   const [isSealing, setIsSealing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [identity, setIdentity] = useState({
     ownerName: "",
     ownerBirthYear: 1988,
@@ -79,19 +81,26 @@ export default function CreateWillPage() {
   const back = () => setStep((current) => Math.max(current - 1, 0));
 
   const handleSeal = async () => {
-    setIsSealing(true);
-    const willId = createWill({
-      ownerName: identity.ownerName,
-      ownerBirthYear: identity.ownerBirthYear,
-      ownerCity: identity.ownerCity,
-      cadenceDays,
-      beneficiaries,
-      assets,
-      finalMessages: messages,
-      socialLinks: socialLinks.filter(Boolean),
-    });
-    await new Promise((resolve) => setTimeout(resolve, 1200));
-    router.push(`/my-will?created=${willId}`);
+    try {
+      setIsSealing(true);
+      setError(null);
+      const willId = await createWill({
+        ownerName: identity.ownerName,
+        ownerBirthYear: identity.ownerBirthYear,
+        ownerCity: identity.ownerCity,
+        cadenceDays,
+        beneficiaries,
+        assets,
+        finalMessages: messages,
+        socialLinks: socialLinks.filter(Boolean),
+      });
+      await new Promise((resolve) => setTimeout(resolve, 1200));
+      router.push(`/my-will?created=${willId}`);
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : "Unable to create will.");
+    } finally {
+      setIsSealing(false);
+    }
   };
 
   return (
@@ -102,6 +111,11 @@ export default function CreateWillPage() {
         <p className="mt-4 max-w-3xl text-lg leading-8 text-white/68">
           Each step is designed to feel more like estate planning than onboarding. Move slowly. The protocol will.
         </p>
+        <div className="mt-4 rounded-[1.5rem] border border-white/10 bg-white/5 px-5 py-4 text-sm text-white/65">
+          {isConnected
+            ? "Wallet connected: this flow will write directly to your deployed GenLayer contract."
+            : "Demo mode is still available, but connect your wallet first if you want this will written on-chain."}
+        </div>
 
         <div className="mt-10 glass-card p-6">
           <div className="flex flex-wrap items-center justify-between gap-4">
@@ -508,6 +522,12 @@ export default function CreateWillPage() {
                     Beneficiaries: {beneficiaries.map((beneficiary) => beneficiary.name).join(", ")}
                   </div>
                 </div>
+              </div>
+            ) : null}
+
+            {error ? (
+              <div className="mt-6 rounded-[1.5rem] border border-alert/35 bg-alert/15 p-4 text-sm text-rose-100">
+                {error}
               </div>
             ) : null}
 

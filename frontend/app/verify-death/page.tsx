@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertTriangle, BookHeart } from "lucide-react";
 
 import { DeathVerificationModal } from "@/components/DeathVerificationModal";
@@ -12,19 +12,32 @@ import { useAfterLifeStore } from "@/lib/store";
 export default function VerifyDeathPage() {
   const wills = useAfterLifeStore((state) => state.wills);
   const triggerVerification = useAfterLifeStore((state) => state.triggerVerification);
+  const loadWillById = useAfterLifeStore((state) => state.loadWillById);
+  const isConnected = useAfterLifeStore((state) => state.isConnected);
 
   const [willId, setWillId] = useState("AL-002");
   const [obituaryUrl, setObituaryUrl] = useState("https://legacy.example.com/john-mercer-obituary");
   const [confirmed, setConfirmed] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
-  const [summary, setSummary] = useState<ReturnType<typeof triggerVerification> | null>(null);
+  const [summary, setSummary] = useState<Awaited<ReturnType<typeof triggerVerification>> | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const will = useMemo(() => wills.find((entry) => entry.id === willId), [willId, wills]);
 
+  useEffect(() => {
+    if (!isConnected || !willId) {
+      return;
+    }
+    loadWillById(willId).catch((nextError) => {
+      setError(nextError instanceof Error ? nextError.message : "Unable to load will details.");
+    });
+  }, [isConnected, loadWillById, willId]);
+
   const handleComplete = useCallback(() => {
-    const result = triggerVerification(willId, obituaryUrl);
-    setSummary(result);
-    return result;
+    return triggerVerification(willId, obituaryUrl).then((result) => {
+      setSummary(result);
+      return result;
+    });
   }, [obituaryUrl, triggerVerification, willId]);
 
   return (
@@ -38,6 +51,12 @@ export default function VerifyDeathPage() {
             and choose the most conservative safe verdict.
           </p>
         </div>
+
+        {error ? (
+          <div className="rounded-[1.5rem] border border-alert/35 bg-alert/15 p-4 text-sm text-rose-100">
+            {error}
+          </div>
+        ) : null}
 
         <Card className="space-y-6 p-8">
           <div className="flex items-start gap-4 rounded-[1.5rem] border border-gold/20 bg-gold/10 p-5 text-sm text-gold/90">
@@ -79,7 +98,14 @@ export default function VerifyDeathPage() {
             fraudulent attempts may be penalized.
           </label>
 
-          <Button size="lg" disabled={!confirmed || !willId || !obituaryUrl} onClick={() => setIsOpen(true)}>
+          <Button
+            size="lg"
+            disabled={!confirmed || !willId || !obituaryUrl}
+            onClick={() => {
+              setError(null);
+              setIsOpen(true);
+            }}
+          >
             Begin AI Verification
           </Button>
         </Card>

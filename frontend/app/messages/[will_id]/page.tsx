@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { Download, Mail } from "lucide-react";
 
 import { FinalMessageEnvelope } from "@/components/FinalMessageEnvelope";
@@ -14,7 +15,19 @@ export default function MessagesPage({
 }) {
   const wills = useAfterLifeStore((state) => state.wills);
   const openMessage = useAfterLifeStore((state) => state.openMessage);
+  const loadWillById = useAfterLifeStore((state) => state.loadWillById);
+  const isConnected = useAfterLifeStore((state) => state.isConnected);
+  const [error, setError] = useState<string | null>(null);
   const will = wills.find((entry) => entry.id === params.will_id);
+
+  useEffect(() => {
+    if (!isConnected) {
+      return;
+    }
+    loadWillById(params.will_id).catch((nextError) => {
+      setError(nextError instanceof Error ? nextError.message : "Unable to load message vault.");
+    });
+  }, [isConnected, loadWillById, params.will_id]);
 
   if (!will) {
     return (
@@ -46,6 +59,12 @@ export default function MessagesPage({
           </Button>
         </div>
 
+        {error ? (
+          <div className="rounded-[1.5rem] border border-alert/35 bg-alert/15 p-4 text-sm text-rose-100">
+            {error}
+          </div>
+        ) : null}
+
         <Card className="space-y-4">
           <div className="flex items-center gap-3 text-gold">
             <Mail className="h-5 w-5" />
@@ -60,7 +79,7 @@ export default function MessagesPage({
         </Card>
 
         <div className="space-y-5">
-          {will.finalMessages.map((message) => (
+          {will.finalMessages.length > 0 ? will.finalMessages.map((message) => (
             <FinalMessageEnvelope
               key={message.id}
               message={message}
@@ -71,7 +90,15 @@ export default function MessagesPage({
                   : undefined
               }
             />
-          ))}
+          )) : (
+            <Card className="space-y-3">
+              <CardTitle>No cached message envelopes yet</CardTitle>
+              <CardDescription className="leading-7">
+                The deployed contract can reveal message contents when you know their on-chain message IDs. This frontend
+                automatically shows messages that were created through this app session.
+              </CardDescription>
+            </Card>
+          )}
         </div>
       </div>
     </div>

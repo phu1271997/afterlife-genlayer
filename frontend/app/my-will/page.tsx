@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Clock3, ScrollText, Sparkles } from "lucide-react";
 
 import { AssetAllocation } from "@/components/AssetAllocation";
@@ -20,12 +20,42 @@ export default function MyWillPage() {
   const userAddress = useAfterLifeStore((state) => state.userAddress);
   const wills = useAfterLifeStore((state) => state.wills);
   const proofOfLife = useAfterLifeStore((state) => state.proofOfLife);
+  const isConnected = useAfterLifeStore((state) => state.isConnected);
+  const refreshOnChainState = useAfterLifeStore((state) => state.refreshOnChainState);
+  const [error, setError] = useState<string | null>(null);
 
   const ownedWills = useMemo(
     () => wills.filter((will) => will.ownerAddress === userAddress),
     [userAddress, wills],
   );
-  const currentWill = ownedWills[0] ?? wills[0];
+  const currentWill = ownedWills[0] ?? (!isConnected ? wills[0] : null);
+
+  useEffect(() => {
+    if (!isConnected) {
+      return;
+    }
+    refreshOnChainState().catch((nextError) => {
+      setError(nextError instanceof Error ? nextError.message : "Unable to sync live will.");
+    });
+  }, [isConnected, refreshOnChainState]);
+
+  if (!currentWill) {
+    return (
+      <div className="section-shell py-14">
+        <Card className="mx-auto max-w-3xl space-y-4 p-8">
+          <div className="section-kicker">Owner dashboard</div>
+          <CardTitle className="mt-3">No live will found for this wallet yet.</CardTitle>
+          <CardDescription className="leading-7">
+            Your wallet is connected to GenLayer, but the contract does not currently map this address to a primary will.
+            Create one from the guided flow to begin using the live protocol.
+          </CardDescription>
+          <Link href="/create-will">
+            <Button>Create your first on-chain will</Button>
+          </Link>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="section-shell py-14">
@@ -43,10 +73,23 @@ export default function MyWillPage() {
           </Link>
         </div>
 
+        {error ? (
+          <div className="rounded-[1.5rem] border border-alert/35 bg-alert/15 p-4 text-sm text-rose-100">
+            {error}
+          </div>
+        ) : null}
+
         <ProofOfLifeButton
           lastCheckIn={currentWill.lastCheckIn}
           nextCheckIn={currentWill.nextCheckIn}
-          onCheckIn={() => proofOfLife(currentWill.id)}
+          onCheckIn={async () => {
+            try {
+              setError(null);
+              await proofOfLife(currentWill.id);
+            } catch (nextError) {
+              setError(nextError instanceof Error ? nextError.message : "Unable to record proof of life.");
+            }
+          }}
         />
 
         <div className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
@@ -100,13 +143,17 @@ export default function MyWillPage() {
               </Link>
             </div>
             <div className="space-y-4">
-              {currentWill.finalMessages.slice(0, 2).map((message) => (
+              {currentWill.finalMessages.length > 0 ? currentWill.finalMessages.slice(0, 2).map((message) => (
                 <FinalMessageEnvelope
                   key={message.id}
                   message={message}
                   unlocked={currentWill.status === "EXECUTED"}
                 />
-              ))}
+              )) : (
+                <div className="rounded-[1.5rem] border border-dashed border-white/10 bg-black/10 p-5 text-sm text-white/55">
+                  No message metadata has been cached for this will yet. New messages created through this app will appear here.
+                </div>
+              )}
             </div>
           </Card>
         </div>

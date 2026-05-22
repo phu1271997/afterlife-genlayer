@@ -13,7 +13,7 @@ export function ProofOfLifeButton({
 }: {
   lastCheckIn: string;
   nextCheckIn: string;
-  onCheckIn: () => void;
+  onCheckIn: () => void | Promise<void>;
 }) {
   return (
     <motion.div
