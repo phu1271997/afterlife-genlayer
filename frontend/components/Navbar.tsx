@@ -1,0 +1,53 @@
+"use client";
+
+import Link from "next/link";
+import { HeartHandshake, ShieldCheck } from "lucide-react";
+
+import { useAfterLifeStore } from "@/lib/store";
+import { shortenAddress } from "@/lib/utils";
+
+export function Navbar() {
+  const balance = useAfterLifeStore((state) => state.balance);
+  const address = useAfterLifeStore((state) => state.userAddress);
+
+  return (
+    <header className="sticky top-0 z-40 border-b border-white/5 bg-midnight/70 backdrop-blur-xl">
+      <div className="section-shell flex h-20 items-center justify-between gap-4">
+        <Link href="/" className="flex items-center gap-3">
+          <div className="flex h-12 w-12 items-center justify-center rounded-full border border-gold/30 bg-gold/10 text-gold shadow-candle">
+            <ShieldCheck className="h-5 w-5" />
+          </div>
+          <div>
+            <div className="font-display text-2xl tracking-[0.14em] text-white">
+              AfterLife
+            </div>
+            <div className="text-[10px] uppercase tracking-[0.35em] text-white/45">
+              Legacy protocol
+            </div>
+          </div>
+        </Link>
+
+        <nav className="hidden items-center gap-6 text-sm text-white/70 md:flex">
+          <Link href="/how-it-works" className="hover:text-white">
+            How it works
+          </Link>
+          <Link href="/create-will" className="hover:text-white">
+            Create will
+          </Link>
+          <Link href="/my-will" className="hover:text-white">
+            My will
+          </Link>
+          <Link href="/verify-death" className="hover:text-white">
+            Verify death
+          </Link>
+        </nav>
+
+        <div className="flex items-center gap-3 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-xs text-white/70">
+          <HeartHandshake className="h-4 w-4 text-gold" />
+          <span>{balance} LIFE</span>
+          <span className="hidden text-white/40 md:inline">{shortenAddress(address)}</span>
+        </div>
+      </div>
+    </header>
+  );
+}
