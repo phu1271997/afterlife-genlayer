@@ -5,10 +5,18 @@ from genlayer import *
 import json
 
 
+def normalize_address(value: str) -> str:
+    """Normalize an address to lowercase hex string for consistent storage."""
+    try:
+        return str(Address(str(value))).lower()
+    except Exception:
+        return str(value).strip().lower()
+
+
 def safe_address(value: str) -> str:
     """Normalize an address string and fail with a user-facing error if invalid."""
     try:
-        return str(Address(value))
+        return normalize_address(Address(value))
     except Exception:
         raise gl.vm.UserError(f"Invalid address: {value}")
 
@@ -79,12 +87,33 @@ def verdict_is_valid(data) -> bool:
     return True
 
 
-class Contract(gl.Contract):
+def _current_block() -> u256:
+    """Get current block number safely. Raises gl.vm.UserError if unavailable."""
+    if not hasattr(gl.message, "block_number"):
+        raise gl.vm.UserError(
+            "gl.message.block_number not available in this genvm version. "
+            "Update to genvm v0.2.16+ for block-based grace period enforcement."
+        )
+    return u256(int(gl.message.block_number))
+
+
+class AfterLife(gl.Contract):
+    """
+    AfterLife — AI-verified digital will protocol on GenLayer.
+
+    Manages 3-phase death verification protocol:
+    1. ACTIVE (proof-of-life)
+    2. VERIFICATION_PENDING → AI consensus
+    3. GRACE_PERIOD (14-day reversibility window)
+    4. EXECUTED (assets distributed, messages unsealed)
+    """
+
     wills: TreeMap[str, str]
     beneficiary_claims: TreeMap[str, str]
     balances: TreeMap[str, u256]
-    user_wills: TreeMap[str, str]
+    user_wills: TreeMap[str, str]  # sender -> JSON array of will_ids
     final_messages: TreeMap[str, str]
+    recipient_public_keys: TreeMap[str, str]  # recipient address -> ECDH public key hex
 
     total_supply: u256
     token_symbol: str
@@ -93,9 +122,10 @@ class Contract(gl.Contract):
     initial_grant: u256
     creation_fee: u256
     verification_fee: u256
-    grace_period_days: u256
+    grace_period_blocks: u256
 
     def __init__(self):
+        super().__init__()
         # GenLayer storage collections auto-initialize; only assign primitives here.
         self.total_supply = u256(0)
         self.token_symbol = "LIFE"
@@ -104,11 +134,12 @@ class Contract(gl.Contract):
         self.initial_grant = u256(200)
         self.creation_fee = u256(10)
         self.verification_fee = u256(5)
-        self.grace_period_days = u256(14)
+        # Default 14 days × 24h × 60min × 60sec / ~5sec per block ≈ 241,920 blocks
+        self.grace_period_blocks = u256(241920)
 
     @gl.public.write
     def claim_starter_tokens(self) -> str:
-        sender = str(gl.message.sender_address)
+        sender = normalize_address(gl.message.sender_address)
         current_balance = self.balances.get(sender, u256(0))
         if current_balance > u256(0):
             raise gl.vm.UserError("Already claimed starter tokens")
@@ -186,7 +217,7 @@ class Contract(gl.Contract):
         except json.JSONDecodeError:
             raise gl.vm.UserError("Invalid social links JSON")
 
-        sender = str(gl.message.sender_address)
+        sender = normalize_address(gl.message.sender_address)
         balance = self.balances.get(sender, u256(0))
         if balance < self.creation_fee:
             raise gl.vm.UserError("Insufficient LIFE balance to create will")
@@ -194,7 +225,7 @@ class Contract(gl.Contract):
         self.balances[sender] = balance - self.creation_fee
         self.will_counter = self.will_counter + u256(1)
 
-        block_number = int(gl.message.block_number) if hasattr(gl.message, "block_number") else 0
+        block_number = int(_current_block())
 
         will = {
             "id": will_id,
@@ -223,7 +254,19 @@ class Contract(gl.Contract):
         }
 
         self.wills[will_id] = json.dumps(will, sort_keys=True)
-        self.user_wills[sender] = will_id
+
+        # Append to user wills list
+        existing_str = self.user_wills.get(sender, "[]")
+        try:
+            existing_list = json.loads(existing_str)
+            if not isinstance(existing_list, list):
+                existing_list = []
+        except Exception:
+            existing_list = []
+
+        if will_id not in existing_list:
+            existing_list.append(will_id)
+        self.user_wills[sender] = json.dumps(existing_list, sort_keys=True)
 
         return json.dumps(
             {
@@ -242,8 +285,8 @@ class Contract(gl.Contract):
             raise gl.vm.UserError("Unknown will_id")
 
         will = json.loads(will_raw)
-        sender = str(gl.message.sender_address)
-        if will["owner_address"] != sender:
+        sender = normalize_address(gl.message.sender_address)
+        if normalize_address(will["owner_address"]) != sender:
             raise gl.vm.UserError("Only will owner can check in")
         if will["status"] not in ["ACTIVE", "VERIFICATION_PENDING", "GRACE_PERIOD"]:
             raise gl.vm.UserError("Will is not in a state that accepts check-ins")
@@ -259,11 +302,7 @@ class Contract(gl.Contract):
             will["verification_triggered_by"] = ""
             will["grace_period_started_block"] = 0
 
-        block_number = (
-            int(gl.message.block_number)
-            if hasattr(gl.message, "block_number")
-            else int(will["check_ins_count"]) + 1
-        )
+        block_number = int(_current_block())
         will["last_check_in_block"] = block_number
         will["check_ins_count"] = int(will["check_ins_count"]) + 1
 
@@ -292,12 +331,12 @@ class Contract(gl.Contract):
             raise gl.vm.UserError("Unknown will_id")
 
         will = json.loads(will_raw)
-        sender = str(gl.message.sender_address)
-        if will["owner_address"] != sender:
+        sender = normalize_address(gl.message.sender_address)
+        if normalize_address(will["owner_address"]) != sender:
             raise gl.vm.UserError("Only will owner can add messages")
 
         recipient = safe_address(recipient_address)
-        trimmed_message = message_text.strip()[:5000]
+        trimmed_message = message_text.strip()[:15000]  # Allow larger limits for encrypted blocks
         if trimmed_message == "":
             raise gl.vm.UserError("Message text required")
 
@@ -321,6 +360,20 @@ class Contract(gl.Contract):
         return json.dumps({"status": "sealed", "message_id": message_id}, sort_keys=True)
 
     @gl.public.write
+    def register_recipient_public_key(self, public_key: str) -> str:
+        sender = normalize_address(gl.message.sender_address)
+        pk = public_key.strip()
+        if pk == "" or len(pk) < 32:
+            raise gl.vm.UserError("Invalid public key")
+        self.recipient_public_keys[sender] = pk
+        return json.dumps({"status": "registered", "address": sender}, sort_keys=True)
+
+    @gl.public.view
+    def get_recipient_public_key(self, address: str) -> str:
+        addr = normalize_address(address)
+        return self.recipient_public_keys.get(addr, "")
+
+    @gl.public.write
     def trigger_death_verification(self, will_id: str, obituary_url: str) -> str:
         will_raw = self.wills.get(will_id, "")
         if will_raw == "":
@@ -330,9 +383,9 @@ class Contract(gl.Contract):
         if will["status"] != "ACTIVE":
             raise gl.vm.UserError("Will is not in ACTIVE state")
 
-        sender = str(gl.message.sender_address)
+        sender = normalize_address(gl.message.sender_address)
         beneficiaries = will["beneficiaries"]
-        is_beneficiary = any(str(beneficiary.get("address", "")) == sender for beneficiary in beneficiaries)
+        is_beneficiary = any(normalize_address(beneficiary.get("address", "")) == sender for beneficiary in beneficiaries)
         if not is_beneficiary:
             raise gl.vm.UserError("Only beneficiaries can trigger verification")
 
@@ -409,31 +462,52 @@ RETURN STRICT JSON:
             raw_verdict = gl.nondet.exec_prompt(prompt, response_format="json")
             return normalize_death_verdict(raw_verdict)
 
-        def validator_fn(leader_result) -> bool:
-            if not isinstance(leader_result, gl.vm.Return):
-                return False
-            return verdict_is_valid(leader_result.calldata)
+        # Real validator consensus principle enforcement (Yêu cầu #3)
+        comparative_principle = (
+            "Validators MUST agree on the death verdict. This is irreversible "
+            "inheritance — accuracy is critical. "
+            "(1) verdict EXACT MATCH required between validators: "
+            "    CONFIRMED_DEAD ≠ ALIVE ≠ INCONCLUSIVE ≠ FRAUD_DETECTED. "
+            "    Any verdict disagreement → consensus FAILS. "
+            "(2) confidence — within ±15 points AND must be consistent with verdict: "
+            "    CONFIRMED_DEAD requires confidence ≥ 85 (per contract rule). "
+            "    If one validator says CONFIRMED_DEAD with conf 90 and another "
+            "    says CONFIRMED_DEAD with conf 60, that's still a MISMATCH because "
+            "    the 60-confidence validator would not trigger grace period. "
+            "(3) red_flags must agree on existence of fraud indicators: "
+            "    if one validator detects 'fake obituary domain' and another "
+            "    doesn't, the disagreement is meaningful — consensus FAILS. "
+            "(4) Each validator MUST independently fetch the obituary URL and "
+            "    social media, NOT blindly accept the leader's evidence. "
+            "Minor wording differences in 'reasoning' are acceptable, but the "
+            "verdict and confidence band must align. "
+            "If a validator's web.render fails for the obituary URL, it must "
+            "default to INCONCLUSIVE — NEVER blanket-accept leader's CONFIRMED_DEAD."
+        )
 
-        verdict = gl.vm.run_nondet_unsafe(leader_fn, validator_fn)
+        verdict = gl.eq_principle.prompt_comparative(leader_fn, principle=comparative_principle)
 
         refund = u256(0)
         if verdict["verdict"] == "CONFIRMED_DEAD" and int(verdict["confidence"]) >= 85:
             will["status"] = "GRACE_PERIOD"
-            will["grace_period_started_block"] = (
-                int(gl.message.block_number) if hasattr(gl.message, "block_number") else 0
-            )
+            will["grace_period_started_block"] = int(_current_block())
             self.balances[sender] = self.balances.get(sender, u256(0)) + self.verification_fee
             refund = self.verification_fee
         elif verdict["verdict"] == "FRAUD_DETECTED":
             will["status"] = "ACTIVE"
-            self.total_supply = self.total_supply - self.verification_fee
+            # Bug #8: Prevent underflow of total_supply
+            if int(self.total_supply) >= int(self.verification_fee):
+                self.total_supply = self.total_supply - self.verification_fee
+            else:
+                self.total_supply = u256(0)
         elif verdict["verdict"] == "ALIVE":
             will["status"] = "ACTIVE"
             self.balances[sender] = self.balances.get(sender, u256(0)) + self.verification_fee
             refund = self.verification_fee
         else:
             will["status"] = "ACTIVE"
-            half_fee = self.verification_fee / u256(2)
+            # Bug #7: u256 division fix
+            half_fee = u256(int(self.verification_fee) // 2)
             self.balances[sender] = self.balances.get(sender, u256(0)) + half_fee
             refund = half_fee
 
@@ -453,7 +527,7 @@ RETURN STRICT JSON:
                 "verdict": verdict["verdict"],
                 "confidence": int(verdict["confidence"]),
                 "fee_refunded": int(refund),
-                "grace_period_days": int(self.grace_period_days),
+                "grace_period_blocks": int(self.grace_period_blocks),
                 "full_verification": verdict,
             },
             sort_keys=True,
@@ -469,14 +543,32 @@ RETURN STRICT JSON:
         if will["status"] != "GRACE_PERIOD":
             raise gl.vm.UserError("Will is not in grace period")
 
-        sender = str(gl.message.sender_address)
+        sender = normalize_address(gl.message.sender_address)
         beneficiaries = will["beneficiaries"]
-        is_beneficiary = any(str(beneficiary.get("address", "")) == sender for beneficiary in beneficiaries)
+        is_beneficiary = any(normalize_address(beneficiary.get("address", "")) == sender for beneficiary in beneficiaries)
         if not is_beneficiary:
             raise gl.vm.UserError("Only beneficiaries can execute will")
 
+        # === CRITICAL FIX: ENFORCE GRACE PERIOD (Yêu cầu #4) ===
+        current_block = _current_block()
+        grace_started = u256(int(will["grace_period_started_block"]))
+
+        if grace_started == u256(0):
+            raise gl.vm.UserError("Grace period start block not recorded. Will cannot be executed.")
+
+        blocks_elapsed = current_block - grace_started
+        if blocks_elapsed < self.grace_period_blocks:
+            blocks_remaining = int(self.grace_period_blocks) - int(blocks_elapsed)
+            raise gl.vm.UserError(
+                f"Grace period not yet elapsed. "
+                f"Current block: {int(current_block)}, "
+                f"Grace started: {int(grace_started)}, "
+                f"Blocks remaining: {blocks_remaining}, "
+                f"Required: {int(self.grace_period_blocks)} blocks"
+            )
+
         will["status"] = "EXECUTED"
-        will["executed_block"] = int(gl.message.block_number) if hasattr(gl.message, "block_number") else 999
+        will["executed_block"] = int(current_block)
         self.wills[will_id] = json.dumps(will, sort_keys=True)
 
         return json.dumps(
@@ -486,6 +578,7 @@ RETURN STRICT JSON:
                 "beneficiaries_count": len(beneficiaries),
                 "messages_unlocked": True,
                 "executed_by": sender,
+                "grace_period_elapsed_blocks": int(blocks_elapsed),
             },
             sort_keys=True,
         )
@@ -519,13 +612,26 @@ RETURN STRICT JSON:
         return json.dumps(message, sort_keys=True)
 
     @gl.public.view
+    def get_user_will_ids(self, address: str) -> str:
+        addr = normalize_address(address)
+        return self.user_wills.get(addr, "[]")
+
+    @gl.public.view
     def get_user_will_id(self, address: str) -> str:
-        addr = safe_address(address)
-        return self.user_wills.get(addr, "")
+        """Maintain backward compatibility by returning the first will_id in user's list."""
+        addr = normalize_address(address)
+        arr_str = self.user_wills.get(addr, "[]")
+        try:
+            arr = json.loads(arr_str)
+            if isinstance(arr, list) and len(arr) > 0:
+                return str(arr[0])
+        except Exception:
+            pass
+        return ""
 
     @gl.public.view
     def get_balance(self, address: str) -> u256:
-        addr = safe_address(address)
+        addr = normalize_address(address)
         return self.balances.get(addr, u256(0))
 
     @gl.public.view
@@ -539,7 +645,7 @@ RETURN STRICT JSON:
     @gl.public.write
     def transfer(self, to: str, amount: u256) -> str:
         recipient = safe_address(to)
-        sender = str(gl.message.sender_address)
+        sender = normalize_address(gl.message.sender_address)
         if amount <= u256(0):
             raise gl.vm.UserError("Amount must be positive")
 
