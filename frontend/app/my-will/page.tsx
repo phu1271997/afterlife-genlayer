@@ -15,6 +15,7 @@ import { WillCard } from "@/components/WillCard";
 import { WillStatusBadge } from "@/components/WillStatusBadge";
 import { useAfterLifeStore } from "@/lib/store";
 import { formatDate } from "@/lib/utils";
+import { addressEquals } from "@/lib/address";
 
 export default function MyWillPage() {
   const userAddress = useAfterLifeStore((state) => state.userAddress);
@@ -25,7 +26,7 @@ export default function MyWillPage() {
   const [error, setError] = useState<string | null>(null);
 
   const ownedWills = useMemo(
-    () => wills.filter((will) => will.ownerAddress === userAddress),
+    () => wills.filter((will) => addressEquals(will.ownerAddress, userAddress)),
     [userAddress, wills],
   );
   const currentWill = ownedWills[0] ?? (!isConnected ? wills[0] : null);
@@ -105,7 +106,7 @@ export default function MyWillPage() {
               <WillStatusBadge status={currentWill.status} />
             </div>
             <AssetAllocation beneficiaries={currentWill.beneficiaries} />
-            {currentWill.graceEndsAt ? <GraceCountdown target={currentWill.graceEndsAt} /> : null}
+            {currentWill.graceEndsAt ? <GraceCountdown target={currentWill.graceEndsAt} will={currentWill} /> : null}
           </Card>
 
           <Card className="space-y-5">
