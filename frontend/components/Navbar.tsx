@@ -6,7 +6,7 @@ import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { useAfterLifeStore } from "@/lib/store";
-import { shortenAddress } from "@/lib/utils";
+import { shortenAddress } from "@/lib/address";
 
 export function Navbar() {
   const balance = useAfterLifeStore((state) => state.balance);
@@ -68,6 +68,12 @@ export function Navbar() {
           </Link>
           <Link href="/verify-death" className="hover:text-white">
             Verify death
+          </Link>
+          <Link href="/register-key" className="hover:text-gold text-white/90">
+            Register key
+          </Link>
+          <Link href="/demo" className="hover:text-gold text-white/90">
+            Demo Walkthrough
           </Link>
         </nav>
 
