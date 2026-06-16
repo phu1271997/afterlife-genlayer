@@ -68,7 +68,7 @@ export default function ClaimPage({
               This will belongs to {will.ownerName}. The current state is {will.status.replace("_", " ")}.
             </CardDescription>
             <AssetAllocation beneficiaries={will.beneficiaries} />
-            {will.graceEndsAt ? <GraceCountdown target={will.graceEndsAt} /> : null}
+            {will.graceEndsAt ? <GraceCountdown target={will.graceEndsAt} will={will} /> : null}
           </Card>
 
           <Card className="space-y-5">
