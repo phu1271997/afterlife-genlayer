@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Cormorant_Garamond, Inter, Spectral } from "next/font/google";
 
 import { Navbar } from "@/components/Navbar";
+import { ContractInfoFooter } from "@/components/ContractInfoFooter";
 
 import "./globals.css";
 
@@ -41,6 +42,7 @@ export default function RootLayout({
       <body>
         <Navbar />
         <main>{children}</main>
+        <ContractInfoFooter />
       </body>
     </html>
   );
