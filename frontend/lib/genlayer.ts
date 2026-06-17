@@ -3,6 +3,7 @@
 import { createClient } from "genlayer-js";
 import { localnet, studionet, testnetAsimov, testnetBradbury } from "genlayer-js/chains";
 import type { Address } from "genlayer-js/types";
+import { wrapWithSnapsBypass } from "./snapsBypass";
 
 declare global {
   interface Window {
@@ -59,7 +60,7 @@ export async function connectGenLayerWallet() {
   const client = createClient({
     chain: getGenLayerChain(),
     account: address,
-    provider: window.ethereum as never,
+    provider: wrapWithSnapsBypass(window.ethereum) as never,
   });
 
   await client.connect(AFTERLIFE_NETWORK);
