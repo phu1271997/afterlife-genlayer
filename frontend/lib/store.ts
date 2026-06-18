@@ -9,7 +9,7 @@ import {
   executeWillOnChain,
   proofOfLifeOnChain,
   readBalance,
-  readUserWillId,
+  readUserWillIds,
   readWill,
   triggerDeathVerificationOnChain,
   type OnChainWillState,
@@ -22,6 +22,7 @@ import {
   type WillRecord,
   mockWills,
 } from "@/lib/mockWills";
+import { addressEquals } from "@/lib/address";
 import { connectGenLayerWallet } from "@/lib/genlayer";
 
 export interface CreateWillInput {
@@ -192,6 +193,8 @@ function buildWillRecordFromChain(data: OnChainWillState, previous?: WillRecord)
       data.status === "GRACE_PERIOD"
         ? previous?.graceEndsAt ?? new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString()
         : previous?.graceEndsAt,
+    gracePeriodStartedBlock: data.grace_period_started_block,
+    gracePeriodBlocks: 241920,
     beneficiaries: (data.beneficiaries ?? []).map((beneficiary, index) => ({
       id: previous?.beneficiaries[index]?.id ?? `${data.id}-beneficiary-${index + 1}`,
       name: beneficiary.name,
@@ -254,22 +257,24 @@ export const useAfterLifeStore = create<AfterLifeState>()(
 
         set({ isWorking: true });
         try {
-          const [balance, liveWillId] = await Promise.all([
+          const [balance, liveWillIds] = await Promise.all([
             readBalance(userAddress),
-            readUserWillId(userAddress),
+            readUserWillIds(userAddress),
           ]);
 
           let nextWills = [...wills];
 
-          if (liveWillId) {
-            const syncedWill = await syncWillFromChain(liveWillId, nextWills);
-            nextWills = mergeWillRecord(syncedWill, nextWills);
+          for (const liveWillId of liveWillIds) {
+            if (liveWillId) {
+              const syncedWill = await syncWillFromChain(liveWillId, nextWills);
+              nextWills = mergeWillRecord(syncedWill, nextWills);
+            }
           }
 
           set({
             balance,
             wills: nextWills,
-            lastViewedWillId: liveWillId || get().lastViewedWillId,
+            lastViewedWillId: liveWillIds[0] || get().lastViewedWillId,
           });
         } finally {
           set({ isWorking: false });
