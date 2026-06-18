@@ -4,6 +4,19 @@
 
 AfterLife is an AI-verified digital will protocol built for GenLayer. It exists for a quiet but enormous problem: people die, and their digital lives often die with them. Wallets become inaccessible. Family archives disappear. Final words remain unwritten or unrecoverable. AfterLife turns that inevitability into a dignified, auditable protocol.
 
+## 🔗 Deployed Contract
+
+| Network    | Address                                    | Explorer                                     |
+|------------|--------------------------------------------|----------------------------------------------|
+| studionet  | `0x202a6d57DFf6617B034eA327f06e834929B06ABF` | [View in Studio](https://studio.genlayer.com/?import-contract=0x202a6d57DFf6617B034eA327f06e834929B06ABF) |
+
+**Live App**: https://afterlife-genlayer-app.vercel.app  
+**Deployed at**: 2026-06-18  
+**Class Name**: `AfterLife` (renamed from `Contract` per GenLayer linter)  
+**Reproducible Steps**: See [deployment/REPRODUCIBLE_STEPS.md](deployment/REPRODUCIBLE_STEPS.md)
+
+---
+
 ## The Quiet Crisis
 
 - Cerulli Associates estimates that roughly `$68 trillion` will move between generations by 2045.
