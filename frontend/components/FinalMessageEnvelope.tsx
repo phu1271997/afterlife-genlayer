@@ -1,11 +1,12 @@
-"use client";
-
+import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { LockKeyhole, MailOpen, Sparkles } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import type { FinalMessage } from "@/lib/mockWills";
 import { formatDate } from "@/lib/utils";
+import { decryptMessageAsRecipient } from "@/lib/encryption";
+import { useAfterLifeStore } from "@/lib/store";
 
 export function FinalMessageEnvelope({
   message,
@@ -16,6 +17,31 @@ export function FinalMessageEnvelope({
   unlocked: boolean;
   onOpen?: () => void;
 }) {
+  const address = useAfterLifeStore((state) => state.userAddress);
+  const [decryptedBody, setDecryptedBody] = useState<string | null>(null);
+  const [decryptError, setDecryptError] = useState<string | null>(null);
+  const [isDecrypting, setIsDecrypting] = useState(false);
+
+  useEffect(() => {
+    if (unlocked && message.body) {
+      if (message.body.startsWith("ENC:v")) {
+        setIsDecrypting(true);
+        decryptMessageAsRecipient(message.body, address)
+          .then((decrypted) => {
+            setDecryptedBody(decrypted);
+          })
+          .catch((err) => {
+            console.error("Decryption failed:", err);
+            setDecryptError("Failed to decrypt this letter. Keys may mismatch or be absent.");
+          })
+          .finally(() => {
+            setIsDecrypting(false);
+          });
+      } else {
+        setDecryptedBody(message.body);
+      }
+    }
+  }, [unlocked, message.body, address]);
   return (
     <motion.div
       layout
@@ -42,7 +68,15 @@ export function FinalMessageEnvelope({
             <Sparkles className="h-3.5 w-3.5" />
             Delivered {message.deliveredAt ? formatDate(message.deliveredAt) : "now"}
           </div>
-          <p className="font-quote text-lg leading-8 text-stone-800">{message.body}</p>
+          {isDecrypting ? (
+            <p className="font-quote text-lg leading-8 text-stone-600 animate-pulse">Decrypting memory envelope...</p>
+          ) : decryptError ? (
+            <div className="rounded-[1rem] border border-rose-200/50 bg-rose-100/10 p-4 text-sm text-rose-900 font-sans">
+              <strong>🔒 Decryption Failed:</strong> {decryptError}
+            </div>
+          ) : (
+            <p className="font-quote text-lg leading-8 text-stone-800">{decryptedBody}</p>
+          )}
           {message.mediaUrl ? (
             <a
               href={message.mediaUrl}
