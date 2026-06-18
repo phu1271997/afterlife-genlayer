@@ -8,6 +8,7 @@ import {
   connectGenLayerWallet,
   createReadClient,
 } from "@/lib/genlayer";
+import { encryptMessageForRecipient } from "@/lib/encryption";
 
 export interface OnChainWillState {
   id: string;
@@ -71,6 +72,25 @@ export async function readUserWillId(address: string) {
   return String(result ?? "");
 }
 
+export async function readUserWillIds(address: string): Promise<string[]> {
+  const readClient = createReadClient();
+  try {
+    const result = await readClient.readContract({
+      address: AFTERLIFE_CONTRACT_ADDRESS,
+      functionName: "get_user_will_ids",
+      args: [address],
+    });
+    if (!result) return [];
+    const arr = JSON.parse(String(result));
+    return Array.isArray(arr) ? arr : [];
+  } catch (err) {
+    console.error("Failed to read user will ids, falling back:", err);
+    // Fallback to reading the single will id
+    const single = await readUserWillId(address);
+    return single ? [single] : [];
+  }
+}
+
 export async function readWill(willId: string) {
   const readClient = createReadClient();
   const raw = await readClient.readContract({
@@ -81,12 +101,49 @@ export async function readWill(willId: string) {
   return JSON.parse(String(raw)) as OnChainWillState;
 }
 
+export async function readFinalMessage(messageId: string) {
+  const readClient = createReadClient();
+  const raw = await readClient.readContract({
+    address: AFTERLIFE_CONTRACT_ADDRESS,
+    functionName: "get_final_message",
+    args: [messageId],
+  });
+  return JSON.parse(String(raw));
+}
+
+
 export async function claimStarterTokensOnChain() {
   const { client } = await connectGenLayerWallet();
   const txHash = await client.writeContract({
     address: AFTERLIFE_CONTRACT_ADDRESS,
     functionName: "claim_starter_tokens",
     args: [],
+    value: BigInt(0),
+  });
+  await waitForSuccessfulWrite(txHash);
+}
+
+export async function readRecipientPublicKey(address: string): Promise<string> {
+  const readClient = createReadClient();
+  try {
+    const result = await readClient.readContract({
+      address: AFTERLIFE_CONTRACT_ADDRESS,
+      functionName: "get_recipient_public_key",
+      args: [address],
+    });
+    return String(result ?? "");
+  } catch (err) {
+    console.error("Failed to read recipient public key:", err);
+    return "";
+  }
+}
+
+export async function registerRecipientPublicKeyOnChain(publicKeyHex: string) {
+  const { client } = await connectGenLayerWallet();
+  const txHash = await client.writeContract({
+    address: AFTERLIFE_CONTRACT_ADDRESS,
+    functionName: "register_recipient_public_key",
+    args: [publicKeyHex],
     value: BigInt(0),
   });
   await waitForSuccessfulWrite(txHash);
@@ -107,7 +164,7 @@ export async function createWillOnChain(input: CreateWillInput) {
       input.cadenceDays,
       JSON.stringify(
         input.beneficiaries.map((beneficiary) => ({
-          address: beneficiary.address,
+          address: beneficiary.address.toLowerCase(),
           name: beneficiary.name,
           share: beneficiary.share,
         })),
@@ -121,13 +178,26 @@ export async function createWillOnChain(input: CreateWillInput) {
   await waitForSuccessfulWrite(txHash);
 
   for (const message of input.finalMessages) {
+    let encryptedBody = message.body;
+    try {
+      const recipientPubKey = await readRecipientPublicKey(message.recipientAddress);
+      if (recipientPubKey && recipientPubKey.trim() !== "") {
+        encryptedBody = await encryptMessageForRecipient(message.body, recipientPubKey);
+      } else {
+        // Recipient hasn't registered a key yet; we store plaintext or symmetric fallback
+        console.warn(`Recipient ${message.recipientAddress} hasn't registered a public key. Storing plaintext message.`);
+      }
+    } catch (err) {
+      console.error("Encryption failed, falling back to plaintext:", err);
+    }
+
     const messageHash = await client.writeContract({
       address: AFTERLIFE_CONTRACT_ADDRESS,
       functionName: "add_final_message",
       args: [
         willId,
         message.recipientAddress,
-        message.body,
+        encryptedBody,
         message.mediaUrl ?? "",
       ],
       value: BigInt(0),
