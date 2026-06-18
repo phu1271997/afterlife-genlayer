@@ -65,12 +65,19 @@ Mitigation:
 - inherits GenLayer's network-level security assumptions
 - AfterLife adds grace-period reversibility to reduce blast radius even after a bad confirmation
 
-## Privacy Considerations
+## Privacy Considerations & ECIES Encryption
 
-- final messages should be encrypted in production
-- off-chain media should be referenced, not embedded directly on-chain
-- only minimal identity fields are needed for cross-reference
-- public verification should expose verdicts and evidence summaries, not intimate message content
+To protect the confidentiality of sensitive final words, AfterLife implements a client-side **ECIES (Elliptic Curve Integrated Encryption Scheme)** hybrid encryption pattern:
+
+1. **Key Registry**: Every recipient generates an ECDH P-256 keypair. The public key is registered in the smart contract via `register_recipient_public_key`, while the private key remains stored securely in their browser's local storage.
+2. **Client-Side Encryption**: When the owner seals a final message for a recipient, the frontend fetches the recipient's registered public key, generates an ephemeral ECDH keypair, derives a shared AES-GCM 256 key, and encrypts the message. Only the ciphertext, IV, and ephemeral public key are sent to the contract (`ENC:v2:ivHex:ephemeralPubKeyHex:ciphertextHex`).
+3. **Decryption on execution**: The plaintext message is never stored on-chain. When the will is executed, the recipient reads the ciphertext from the contract and decrypts it using their local ECDH private key.
+4. **Threat Mitigations**:
+   - *Threat: Chain explorer reading plaintext* → **ELIMINATED** via ECIES ciphertext storage.
+   - *Threat: Recipient losing private key/browser storage* → **MITIGATED** by encouraging backups of the private key JWK. Without it, messages are permanently unrecoverable (by design).
+   - *Threat: Incorrect recipient public key* → **MITIGATED** by checking public key existence on the contract before sealing messages.
+   - *Threat: Re-encryption fallback* → **LEGACY PLAIN TEXT** messages are flagged as legacy unencrypted when unsealed.
+
 
 ## Operational Guidance
 
