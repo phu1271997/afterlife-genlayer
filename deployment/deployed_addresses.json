@@ -1,5 +1,9 @@
 {
   "studionet": {
-    "AfterLife": "0x202a6d57DFf6617B034eA327f06e834929B06ABF"
+    "AfterLife": "0x13Ca19F9D1Ae9888dc5E65f7353400Db3DD7c891",
+    "deployed_at": "2026-07-15",
+    "source": "contracts/afterlife.py",
+    "class": "AfterLife",
+    "rpc": "https://studio.genlayer.com/api"
   }
 }

@@ -116,6 +116,7 @@ def setup_gl_state():
     
     # Setup default mock behaviors
     gl_instance.eq_principle.prompt_comparative = lambda fn, principle: fn()
+    gl_instance.vm.run_nondet_unsafe = lambda leader_fn, validator_fn: leader_fn()
     gl_instance.nondet.exec_prompt = lambda prompt, response_format=None: {
         "verdict": "CONFIRMED_DEAD",
         "confidence": 95,

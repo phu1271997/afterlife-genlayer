@@ -178,17 +178,26 @@ export async function createWillOnChain(input: CreateWillInput) {
   await waitForSuccessfulWrite(txHash);
 
   for (const message of input.finalMessages) {
-    let encryptedBody = message.body;
+    // REQUIRED: client-side ECIES encryption — contract rejects non-ENC:v2: payloads
+    const recipientPubKey = await readRecipientPublicKey(message.recipientAddress);
+    if (!recipientPubKey || recipientPubKey.trim() === "") {
+      throw new Error(
+        `Recipient ${message.recipientAddress} has not registered a public key. ` +
+          "They must visit /register-key before you can seal an encrypted final message."
+      );
+    }
+
+    let encryptedBody: string;
     try {
-      const recipientPubKey = await readRecipientPublicKey(message.recipientAddress);
-      if (recipientPubKey && recipientPubKey.trim() !== "") {
-        encryptedBody = await encryptMessageForRecipient(message.body, recipientPubKey);
-      } else {
-        // Recipient hasn't registered a key yet; we store plaintext or symmetric fallback
-        console.warn(`Recipient ${message.recipientAddress} hasn't registered a public key. Storing plaintext message.`);
-      }
+      encryptedBody = await encryptMessageForRecipient(message.body, recipientPubKey);
     } catch (err) {
-      console.error("Encryption failed, falling back to plaintext:", err);
+      throw new Error(
+        `Failed to encrypt final message for ${message.recipientAddress}: ` +
+          (err instanceof Error ? err.message : String(err))
+      );
+    }
+    if (!encryptedBody.startsWith("ENC:v2:")) {
+      throw new Error("Encryption produced an invalid envelope (expected ENC:v2:…).");
     }
 
     const messageHash = await client.writeContract({
@@ -196,7 +205,7 @@ export async function createWillOnChain(input: CreateWillInput) {
       functionName: "add_final_message",
       args: [
         willId,
-        message.recipientAddress,
+        message.recipientAddress.toLowerCase(),
         encryptedBody,
         message.mediaUrl ?? "",
       ],

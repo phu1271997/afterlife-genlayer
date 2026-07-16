@@ -388,6 +388,12 @@ export default function CreateWillPage() {
               <div className="space-y-6">
                 <div>
                   <CardTitle>Seal final messages</CardTitle>
+                  <CardDescription className="mt-2 text-white/60">
+                    Messages are encrypted client-side (ENC:v2) with the recipient&apos;s on-chain public key.
+                    Each recipient must register a key at{" "}
+                    <a href="/register-key" className="text-gold underline">/register-key</a> first —
+                    plaintext is rejected by the contract.
+                  </CardDescription>
                   <CardDescription className="mt-2">
                     Optional, but often the most meaningful part of the will.
                   </CardDescription>

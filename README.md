@@ -8,12 +8,24 @@ AfterLife is an AI-verified digital will protocol built for GenLayer. It exists 
 
 | Network    | Address                                    | Explorer                                     |
 |------------|--------------------------------------------|----------------------------------------------|
-| studionet  | `0x202a6d57DFf6617B034eA327f06e834929B06ABF` | [View in Studio](https://studio.genlayer.com/?import-contract=0x202a6d57DFf6617B034eA327f06e834929B06ABF) |
+| studionet  | `0x13Ca19F9D1Ae9888dc5E65f7353400Db3DD7c891` | [Studio import](https://studio.genlayer.com/?import-contract=0x13Ca19F9D1Ae9888dc5E65f7353400Db3DD7c891) |
 
 **Live App**: https://afterlife-genlayer-app.vercel.app  
-**Deployed at**: 2026-06-18  
-**Class Name**: `AfterLife` (renamed from `Contract` per GenLayer linter)  
-**Reproducible Steps**: See [deployment/REPRODUCIBLE_STEPS.md](deployment/REPRODUCIBLE_STEPS.md)
+**Class Name**: `AfterLife` (not `Contract` — GenLayer linter skips the base name)  
+**Env**: `frontend/.env.example` → `NEXT_PUBLIC_AFTERLIFE_CONTRACT_ADDRESS`  
+**Reproducible Steps**: [deployment/REPRODUCIBLE_STEPS.md](deployment/REPRODUCIBLE_STEPS.md)  
+**Judge checklist**: [docs/VERIFICATION.md](docs/VERIFICATION.md)
+
+### Reviewer fixes (resubmission)
+
+| Issue | Fix |
+|---|---|
+| Address casing on My Will | `addressEquals()` / lowercase normalize everywhere |
+| Class named `Contract` | Renamed to **`AfterLife`** |
+| Validator only schema-checked leader | Validators **re-fetch obituary + re-run LLM**, then match verdict ±15 confidence |
+| Grace period not enforced | `execute_will` requires `current_block - grace_started >= grace_period_blocks` |
+| Plaintext sealed messages | Client **ECIES encrypt** (`ENC:v2:…`); contract **rejects** non-encrypted payloads |
+| Contract address missing | Documented in README + `.env.example` + footer |
 
 ---
 
@@ -49,42 +61,47 @@ obituary_content = gl.nondet.web.render(obituary_url, mode="text")[:2000]
 ```
 
 ```python
-raw_verdict = gl.nondet.exec_prompt(prompt, response_format="json")
+# Each validator independently:
+# 1) web.render(obituary_url) + social evidence
+# 2) exec_prompt → death verdict JSON
+# 3) compare leader: exact verdict + confidence ±15
 verdict = gl.vm.run_nondet_unsafe(leader_fn, validator_fn)
 ```
 
 That combination means the contract can:
 
-- read obituary pages directly
+- read obituary pages directly (every validator, not only the leader)
 - inspect memorial language from public web sources
-- ask AI validators whether the evidence is sufficient, suspicious, or inconclusive
-- do all of it without a single trusted oracle
+- require comparative consensus on death verdict
+- enforce a block-based grace window before execution
 
 ## Features
 
 - Digital will creation with beneficiary allocations
 - Proof-of-life check-ins for the owner
-- AI death verification using multi-source evidence
-- Reversible 14-day grace period
-- Final sealed messages for loved ones
-- Mock asset inventory for crypto, NFTs, domains, and archives
+- AI death verification using multi-source evidence + real validator re-execution
+- Reversible 14-day (~241,920 blocks) grace period **enforced on-chain**
+- Final sealed messages: **client-encrypted** ECDH + AES-GCM (`ENC:v2:`)
+- Recipient public-key registry (`register_recipient_public_key`)
+- Address normalization (case-insensitive) end-to-end
 - `$LIFE` token loop for will creation and verification
 
 ## Security & Trust
 
-- Conservative AI verdict rules favor `INCONCLUSIVE` over accidental execution
-- All nondeterministic calls are wrapped in `gl.vm.run_nondet_unsafe(...)`
-- Beneficiaries cannot trigger execution directly from a single obituary
-- The owner can return during the grace period and reset the will to active
-- Fraud attempts can be detected and penalized
+- Conservative AI rules favor `INCONCLUSIVE` over accidental execution
+- Validators re-run full analysis — not format-only checks
+- `execute_will` blocked until grace blocks elapsed
+- Owner can `proof_of_life` during grace and cancel execution
+- Plaintext letters rejected by `add_final_message`
 
-See [docs/SECURITY.md](/Users/peter/AI/AfterLife/docs/SECURITY.md) for the full threat model.
+See [docs/SECURITY.md](docs/SECURITY.md) for the full threat model.
 
 ## Privacy
 
-- Final messages can be encrypted in production deployments
-- Off-chain media can be referenced without placing raw files on-chain
-- Identity details are minimized to what verification needs: name, birth year, and city
+- Final messages **must** be encrypted client-side before seal
+- Recipients register ECDH P-256 public keys on-chain; private keys stay in browser
+- Off-chain media is referenced by URL only
+- Identity minimized to name, birth year, and city
 
 ## Tokenomics
 
@@ -109,15 +126,20 @@ See [docs/SECURITY.md](/Users/peter/AI/AfterLife/docs/SECURITY.md) for the full 
 
 ## Live Demo
 
-Placeholder: `https://afterlife-demo.example`
+https://afterlife-genlayer-app.vercel.app
 
 ## Local Setup
 
 ```bash
-cd "/Users/peter/AI/AfterLife/frontend"
+cd frontend
+cp .env.example .env.local
+# set NEXT_PUBLIC_AFTERLIFE_CONTRACT_ADDRESS after Studio deploy of contracts/afterlife.py
 npm install
 npm run dev
 ```
+
+Open http://localhost:3000 — connect wallet → claim starter LIFE → create will.  
+Beneficiaries: register key at `/register-key` **before** owners seal encrypted messages.
 
 Then open [http://localhost:3000](http://localhost:3000).
 

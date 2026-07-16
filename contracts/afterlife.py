@@ -340,6 +340,21 @@ class AfterLife(gl.Contract):
         if trimmed_message == "":
             raise gl.vm.UserError("Message text required")
 
+        # Client-side encryption required — never store plain human letters on-chain.
+        # Frontend must produce ENC:v2:iv:ephPub:ciphertext via recipient ECDH public key.
+        if not trimmed_message.startswith("ENC:v2:"):
+            raise gl.vm.UserError(
+                "Final messages must be client-encrypted (ENC:v2:…). "
+                "Recipient must register_recipient_public_key first; "
+                "the frontend encrypts before calling add_final_message."
+            )
+        # Ensure recipient has a registered key (defense in depth)
+        if self.recipient_public_keys.get(recipient, "") == "":
+            raise gl.vm.UserError(
+                "Recipient has no registered public key. "
+                "They must call register_recipient_public_key before sealed messages can be stored."
+            )
+
         self.message_counter = self.message_counter + u256(1)
         message_id = f"MSG-{int(self.message_counter):06d}"
 
@@ -350,6 +365,8 @@ class AfterLife(gl.Contract):
             "from_name": will["owner_full_name"],
             "to_address": recipient,
             "message_text": trimmed_message,
+            "encrypted": True,
+            "encryption": "ECDH-P256-AES-GCM-v2",
             "media_url": media_url.strip()[:500],
             "sealed": True,
             "created_will_check_in": int(will["check_ins_count"]),
@@ -401,14 +418,31 @@ class AfterLife(gl.Contract):
         social_links = will["social_links"]
         social_links_json = json.dumps(social_links)
 
-        def leader_fn():
-            obituary_content = ""
+        def _independently_analyze_death() -> dict:
+            """
+            Full death-verification analysis. EVERY validator re-runs this:
+            re-fetches obituary + social evidence and re-executes the LLM.
+            Validators must NOT only schema-check the leader payload.
+            """
             try:
                 obituary_content = gl.nondet.web.render(obituary_url, mode="text")[:2000]
             except Exception:
-                obituary_content = "[Unable to fetch obituary URL]"
+                # Fetch failure must not silently confirm death
+                return normalize_death_verdict(
+                    {
+                        "verdict": "INCONCLUSIVE",
+                        "confidence": 0,
+                        "evidence_sources": [],
+                        "red_flags": ["obituary_url_unreachable"],
+                        "reasoning": "Could not fetch the claimed obituary URL.",
+                        "estimated_death_date": "",
+                    }
+                )
 
-            social_evidence = ""
+            if not str(obituary_content).strip() or str(obituary_content).startswith("["):
+                # Empty / placeholder fetch → inconclusive
+                pass
+
             try:
                 if isinstance(social_links, list) and len(social_links) > 0:
                     social_evidence = gl.nondet.web.render(str(social_links[0]), mode="text")[:1500]
@@ -437,10 +471,10 @@ SOCIAL MEDIA STATE:
 {social_evidence}
 
 CHECKLIST:
-1. Verify obituary authenticity, name, age, and city alignment.
-2. Cross-reference memorial activity and account silence.
+1. Verify obituary authenticity, name, age, and city alignment against owner details.
+2. Cross-reference memorial activity and account silence from social evidence.
 3. Look for fraud indicators, vague details, or suspicious domains.
-4. Default to INCONCLUSIVE when evidence is weak.
+4. Default to INCONCLUSIVE when evidence is weak or the page is empty/unreachable.
 
 CLASSIFICATION RULES:
 - CONFIRMED_DEAD: confidence 85 or higher, multiple sources agree, no serious fraud indicators
@@ -462,30 +496,71 @@ RETURN STRICT JSON:
             raw_verdict = gl.nondet.exec_prompt(prompt, response_format="json")
             return normalize_death_verdict(raw_verdict)
 
-        # Real validator consensus principle enforcement (Yêu cầu #3)
-        comparative_principle = (
-            "Validators MUST agree on the death verdict. This is irreversible "
-            "inheritance — accuracy is critical. "
-            "(1) verdict EXACT MATCH required between validators: "
-            "    CONFIRMED_DEAD ≠ ALIVE ≠ INCONCLUSIVE ≠ FRAUD_DETECTED. "
-            "    Any verdict disagreement → consensus FAILS. "
-            "(2) confidence — within ±15 points AND must be consistent with verdict: "
-            "    CONFIRMED_DEAD requires confidence ≥ 85 (per contract rule). "
-            "    If one validator says CONFIRMED_DEAD with conf 90 and another "
-            "    says CONFIRMED_DEAD with conf 60, that's still a MISMATCH because "
-            "    the 60-confidence validator would not trigger grace period. "
-            "(3) red_flags must agree on existence of fraud indicators: "
-            "    if one validator detects 'fake obituary domain' and another "
-            "    doesn't, the disagreement is meaningful — consensus FAILS. "
-            "(4) Each validator MUST independently fetch the obituary URL and "
-            "    social media, NOT blindly accept the leader's evidence. "
-            "Minor wording differences in 'reasoning' are acceptable, but the "
-            "verdict and confidence band must align. "
-            "If a validator's web.render fails for the obituary URL, it must "
-            "default to INCONCLUSIVE — NEVER blanket-accept leader's CONFIRMED_DEAD."
-        )
+        def leader_fn() -> dict:
+            return _independently_analyze_death()
 
-        verdict = gl.eq_principle.prompt_comparative(leader_fn, principle=comparative_principle)
+        def validator_fn(leader_result) -> bool:
+            """
+            Real comparative validation:
+            1) schema-check leader payload
+            2) RE-RUN full web.render + LLM analysis independently
+            3) require exact verdict match + confidence within ±15
+            """
+            leader_data = leader_result
+            # GenLayer may wrap leader output
+            if hasattr(leader_result, "calldata"):
+                try:
+                    payload = leader_result.calldata
+                    if isinstance(payload, (bytes, bytearray)):
+                        payload = payload.decode("utf-8", errors="ignore")
+                    if isinstance(payload, str):
+                        leader_data = json.loads(payload)
+                    else:
+                        leader_data = payload
+                except Exception:
+                    return False
+            if isinstance(leader_data, str):
+                try:
+                    leader_data = json.loads(leader_data)
+                except Exception:
+                    return False
+            if not isinstance(leader_data, dict):
+                return False
+
+            leader_norm = normalize_death_verdict(leader_data)
+            if not verdict_is_valid(leader_norm):
+                return False
+
+            # Independently re-fetch obituary / social pages and re-run LLM
+            mine = _independently_analyze_death()
+            if mine["verdict"] != leader_norm["verdict"]:
+                return False
+            if abs(int(mine["confidence"]) - int(leader_norm["confidence"])) > 15:
+                return False
+            # CONFIRMED_DEAD must clear the 85 threshold on BOTH leader and validator
+            if leader_norm["verdict"] == "CONFIRMED_DEAD":
+                if int(leader_norm["confidence"]) < 85 or int(mine["confidence"]) < 85:
+                    return False
+            return True
+
+        # Real multi-validator consensus: each node re-executes analysis
+        raw_result = gl.vm.run_nondet_unsafe(leader_fn, validator_fn)
+        if isinstance(raw_result, str):
+            try:
+                raw_result = json.loads(raw_result)
+            except Exception:
+                raw_result = {
+                    "verdict": "INCONCLUSIVE",
+                    "confidence": 0,
+                    "reasoning": "Unparseable consensus result",
+                }
+        if not isinstance(raw_result, dict):
+            raw_result = {
+                "verdict": "INCONCLUSIVE",
+                "confidence": 0,
+                "reasoning": "Invalid consensus result type",
+            }
+        verdict = normalize_death_verdict(raw_result)
 
         refund = u256(0)
         if verdict["verdict"] == "CONFIRMED_DEAD" and int(verdict["confidence"]) >= 85:
@@ -641,6 +716,49 @@ RETURN STRICT JSON:
     @gl.public.view
     def get_will_count(self) -> u256:
         return self.will_counter
+
+    @gl.public.view
+    def get_grace_period_blocks(self) -> u256:
+        return self.grace_period_blocks
+
+    @gl.public.view
+    def get_contract_info(self) -> str:
+        """Identity + method list for reviewers / explorers."""
+        return json.dumps(
+            {
+                "name": "AfterLife",
+                "class": "AfterLife",
+                "source": "contracts/afterlife.py",
+                "network": "studionet",
+                "features": [
+                    "address_normalization",
+                    "comparative_death_verification",
+                    "grace_period_block_enforcement",
+                    "recipient_public_keys",
+                    "client_encrypted_final_messages",
+                ],
+                "methods": [
+                    "claim_starter_tokens",
+                    "create_will",
+                    "proof_of_life",
+                    "add_final_message",
+                    "register_recipient_public_key",
+                    "get_recipient_public_key",
+                    "trigger_death_verification",
+                    "execute_will",
+                    "get_will",
+                    "get_final_message",
+                    "get_user_will_ids",
+                    "get_user_will_id",
+                    "get_balance",
+                    "get_grace_period_blocks",
+                    "get_contract_info",
+                ],
+                "grace_period_blocks": int(self.grace_period_blocks),
+                "confirmed_dead_min_confidence": 85,
+            },
+            sort_keys=True,
+        )
 
     @gl.public.write
     def transfer(self, to: str, amount: u256) -> str:

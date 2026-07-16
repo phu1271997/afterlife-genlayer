@@ -85,3 +85,25 @@ To protect the confidentiality of sensitive final words, AfterLife implements a 
 - avoid overfitting prompts to a single obituary source
 - maintain transparent logs for verification attempts
 - keep fee design aligned with abuse prevention rather than revenue extraction
+
+## Auditor resubmission controls (2026)
+
+### Address normalization
+All storage keys and comparisons use lowercase hex addresses (`normalize_address` / frontend `addressEquals`) so MetaMask checksum vs lowercasing cannot hide a will on My Will.
+
+### Real validator consensus
+`trigger_death_verification` uses `gl.vm.run_nondet_unsafe`:
+- leader runs full `web.render(obituary)` + social fetch + `exec_prompt`
+- each validator re-runs the **same full analysis** (not schema-only)
+- accept only if verdict matches exactly and confidence within ±15
+- `CONFIRMED_DEAD` requires confidence ≥ 85 on both sides
+
+### Grace period block enforcement
+`execute_will` requires:
+`current_block - grace_period_started_block >= grace_period_blocks`
+Immediate execution after AI verdict is rejected on-chain.
+
+### Encrypted final messages
+Contract rejects any `add_final_message` payload that is not `ENC:v2:…`.
+Frontend encrypts with recipient ECDH public key registered via `register_recipient_public_key`.
+Private keys never leave the recipient browser (localStorage JWK).

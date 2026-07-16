@@ -68,6 +68,10 @@ export interface WillRecord {
   nextCheckIn: string;
   status: WillStatus;
   graceEndsAt?: string;
+  /** On-chain block when GRACE_PERIOD started (for block-based countdown) */
+  gracePeriodStartedBlock?: number;
+  /** Required blocks before execute_will is allowed */
+  gracePeriodBlocks?: number;
   beneficiaries: Beneficiary[];
   assets: DigitalAsset[];
   finalMessages: FinalMessage[];

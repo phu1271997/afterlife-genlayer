@@ -2,16 +2,18 @@ import { getAddress, isAddress } from "viem";
 
 /**
  * Normalize address to lowercase for consistent comparison.
- * Use this for ALL address comparisons across the app.
+ * CRITICAL: never use strict === on raw addresses (MetaMask checksum vs lower).
+ * Use addressEquals() for all owner / beneficiary filters.
  */
 export function normalizeAddress(addr: string | undefined | null): string {
   if (!addr) return "";
   try {
     const trimmed = addr.trim();
     if (!isAddress(trimmed)) return trimmed.toLowerCase();
-    return trimmed.toLowerCase();
+    // Always lowercase for equality — do not keep EIP-55 for comparisons
+    return getAddress(trimmed).toLowerCase();
   } catch {
-    return addr.toLowerCase();
+    return String(addr).toLowerCase();
   }
 }
 
