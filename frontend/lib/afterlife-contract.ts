@@ -46,7 +46,8 @@ async function waitForSuccessfulWrite(txHash: `0x${string}`) {
   });
 
   if (receipt.txExecutionResultName !== ExecutionResult.FINISHED_WITH_RETURN) {
-    throw new Error("The transaction finalized, but contract execution did not succeed.");
+    console.error("GenLayer transaction execution failed, receipt:", receipt);
+    throw new Error(`The transaction finalized, but contract execution did not succeed. Details: ${JSON.stringify(receipt)}`);
   }
 
   return receipt;
