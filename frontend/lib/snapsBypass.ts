@@ -80,9 +80,24 @@ export function installEthereumSnapsPolyfill(): void {
   if (typeof window === "undefined") return;
   const w = window as any;
   if (w.ethereum) {
-    w.ethereum = patchProvider(w.ethereum);
+    try {
+      w.ethereum = patchProvider(w.ethereum);
+    } catch (err) {
+      console.warn("Could not patch window.ethereum globally:", err);
+    }
     if (Array.isArray(w.ethereum?.providers)) {
-      w.ethereum.providers = w.ethereum.providers.map(patchProvider);
+      try {
+        w.ethereum.providers = w.ethereum.providers.map(patchProvider);
+      } catch (err) {
+        console.warn("Could not patch window.ethereum.providers globally:", err);
+        try {
+          for (let i = 0; i < w.ethereum.providers.length; i++) {
+            w.ethereum.providers[i] = patchProvider(w.ethereum.providers[i]);
+          }
+        } catch (innerErr) {
+          console.warn("Could not patch provider elements in-place:", innerErr);
+        }
+      }
     }
   }
 }
