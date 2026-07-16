@@ -58,3 +58,52 @@ Thanks — AfterLife resubmitted with the repaired contract + live binding.
    Live: https://afterlife-genlayer-app.vercel.app
    Source: contracts/afterlife.py
 ```
+
+## Reviewer resubmission evidence 2026-07-16
+
+- **Commit SHA**: `162eb29ac8c4455b9cedc45631ccfb83a4eaba6a`
+- **Live App URL**: https://afterlife-genlayer-app.vercel.app
+- **Verification Timestamp**: 2026-07-16 10:33:00 UTC+7
+- **RPC Output (`get_contract_info`)**:
+  ```json
+  {
+    "class": "AfterLife",
+    "confirmed_dead_min_confidence": 85,
+    "features": [
+      "address_normalization",
+      "comparative_death_verification",
+      "grace_period_block_enforcement",
+      "recipient_public_keys",
+      "client_encrypted_final_messages"
+    ],
+    "grace_period_blocks": 241920,
+    "methods": [
+      "claim_starter_tokens",
+      "create_will",
+      "proof_of_life",
+      "add_final_message",
+      "register_recipient_public_key",
+      "get_recipient_public_key",
+      "trigger_death_verification",
+      "execute_will",
+      "get_will",
+      "get_final_message",
+      "get_user_will_ids",
+      "get_user_will_id",
+      "get_balance",
+      "get_grace_period_blocks",
+      "get_contract_info"
+    ],
+    "name": "AfterLife",
+    "network": "studionet",
+    "source": "contracts/afterlife.py"
+  }
+  ```
+
+### Checklist items verified:
+1. **Case-Insensitive Address Comparison** (✅ Item 1): Implemented normalizing functions and the `addressEquals` helper logic in `frontend/app/my-will/page.tsx` line 29.
+2. **Contract Class Rename** (✅ Item 2): Renamed `class Contract` to `class AfterLife(gl.Contract)` in `contracts/afterlife.py` line 100.
+3. **Comparative Death Verification** (✅ Item 3): Validators independently run web.render and call the LLM (`_independently_analyze_death()` in `contracts/afterlife.py` line 535) rather than just validating the format.
+4. **Grace Period Enforcement** (✅ Item 4): `execute_will` now checks if the elapsed blocks are greater than or equal to `grace_period_blocks` (241,920 blocks, or ~30 days) in `contracts/afterlife.py` lines 635-643.
+5. **Message Encryption** (✅ Item 5): Implemented `ENC:v2` ECIES envelopes in `frontend/lib/encryption.ts` and strict checks in `contracts/afterlife.py`.
+6. **Address Pinning** (✅ Item 6): Updated the deployed contract address `0x13Ca19F9D1Ae9888dc5E65f7353400Db3DD7c891` in `README.md`, `frontend/.env.example`, and frontend footer config.
