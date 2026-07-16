@@ -15,7 +15,7 @@ declare global {
 }
 
 // Fallback address — always override with NEXT_PUBLIC_AFTERLIFE_CONTRACT_ADDRESS after redeploy
-const DEFAULT_CONTRACT_ADDRESS = "0x13Ca19F9D1Ae9888dc5E65f7353400Db3DD7c891";
+const DEFAULT_CONTRACT_ADDRESS = "0x35669C1599e43604C863dD48dB491684A27cB810";
 const DEFAULT_NETWORK = "studionet";
 const DEFAULT_RPC = "https://studio.genlayer.com/api";
 

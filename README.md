@@ -8,7 +8,7 @@ AfterLife is an AI-verified digital will protocol built for GenLayer. It exists 
 
 | Network    | Address                                    | Explorer                                     |
 |------------|--------------------------------------------|----------------------------------------------|
-| studionet  | `0x13Ca19F9D1Ae9888dc5E65f7353400Db3DD7c891` | [Studio import](https://studio.genlayer.com/?import-contract=0x13Ca19F9D1Ae9888dc5E65f7353400Db3DD7c891) |
+| studionet  | `0x35669C1599e43604C863dD48dB491684A27cB810` | [Studio import](https://studio.genlayer.com/?import-contract=0x35669C1599e43604C863dD48dB491684A27cB810) |
 
 **Live App**: https://afterlife-genlayer-app.vercel.app  
 **Class Name**: `AfterLife` (not `Contract` — GenLayer linter skips the base name)  

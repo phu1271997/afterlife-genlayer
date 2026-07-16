@@ -1,6 +1,6 @@
 {
   "studionet": {
-    "AfterLife": "0x13Ca19F9D1Ae9888dc5E65f7353400Db3DD7c891",
+    "AfterLife": "0x35669C1599e43604C863dD48dB491684A27cB810",
     "deployed_at": "2026-07-15",
     "source": "contracts/afterlife.py",
     "class": "AfterLife",

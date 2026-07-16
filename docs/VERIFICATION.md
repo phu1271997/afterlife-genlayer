@@ -18,7 +18,7 @@
 |---|---|
 | Class | `AfterLife` |
 | Source | `contracts/afterlife.py` |
-| Address | `0x13Ca19F9D1Ae9888dc5E65f7353400Db3DD7c891` |
+| Address | `0x35669C1599e43604C863dD48dB491684A27cB810` |
 | Network | GenLayer Studionet |
 | RPC | `https://studio.genlayer.com/api` |
 | Live app | https://afterlife-genlayer-app.vercel.app |
@@ -54,7 +54,7 @@ Thanks — AfterLife resubmitted with the repaired contract + live binding.
 3) Grace period: execute_will blocked until block delta ≥ grace_period_blocks
 4) Recipient keys + client ECIES encryption (ENC:v2:); plaintext rejected on-chain
 5) Frontend address comparisons are case-insensitive (addressEquals)
-6) Contract address: 0x13Ca19F9D1Ae9888dc5E65f7353400Db3DD7c891 on Studionet
+6) Contract address: 0x35669C1599e43604C863dD48dB491684A27cB810 on Studionet
    Live: https://afterlife-genlayer-app.vercel.app
    Source: contracts/afterlife.py
 ```
@@ -106,4 +106,4 @@ Thanks — AfterLife resubmitted with the repaired contract + live binding.
 3. **Comparative Death Verification** (✅ Item 3): Validators independently run web.render and call the LLM (`_independently_analyze_death()` in `contracts/afterlife.py` line 535) rather than just validating the format.
 4. **Grace Period Enforcement** (✅ Item 4): `execute_will` now checks if the elapsed blocks are greater than or equal to `grace_period_blocks` (241,920 blocks, or ~30 days) in `contracts/afterlife.py` lines 635-643.
 5. **Message Encryption** (✅ Item 5): Implemented `ENC:v2` ECIES envelopes in `frontend/lib/encryption.ts` and strict checks in `contracts/afterlife.py`.
-6. **Address Pinning** (✅ Item 6): Updated the deployed contract address `0x13Ca19F9D1Ae9888dc5E65f7353400Db3DD7c891` in `README.md`, `frontend/.env.example`, and frontend footer config.
+6. **Address Pinning** (✅ Item 6): Updated the deployed contract address `0x35669C1599e43604C863dD48dB491684A27cB810` in `README.md`, `frontend/.env.example`, and frontend footer config.
