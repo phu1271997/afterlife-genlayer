@@ -61,7 +61,7 @@ Thanks — AfterLife resubmitted with the repaired contract + live binding.
 
 ## Reviewer resubmission evidence 2026-07-16
 
-- **Commit SHA**: `b672293460771415e050cd4e6522391d976a086c`
+- **Commit SHA**: `20be702f0a4383202571f61b7b83839ea7fd8f65`
 - **Live App URL**: https://afterlife-genlayer-app.vercel.app
 - **Verification Timestamp**: 2026-07-16 10:33:00 UTC+7
 - **RPC Output (`get_contract_info`)**:
