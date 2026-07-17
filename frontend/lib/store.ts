@@ -39,6 +39,7 @@ export interface CreateWillInput {
 interface AfterLifeState {
   userAddress: string;
   balance: number;
+  balanceLoaded: boolean;
   wills: WillRecord[];
   lastViewedWillId: string;
   isConnected: boolean;
@@ -69,6 +70,18 @@ function getStorage(): StateStorage {
     return memoryStorage;
   }
   return window.localStorage;
+}
+
+function friendlyClaimError(raw: string): string {
+  // Try to extract a UserError message from the GenLayer receipt JSON dump.
+  const match = raw.match(/UserError[^"]*"([^"]+)"/i);
+  if (match?.[1]) {
+    return `Claim failed: ${match[1]}`;
+  }
+  if (raw.length > 240) {
+    return "Claim failed: contract execution did not succeed. Check the network selection in your wallet and try again.";
+  }
+  return raw;
 }
 
 function weightedVerdict(): VerificationVerdict {
@@ -232,12 +245,13 @@ export const useAfterLifeStore = create<AfterLifeState>()(
     (set, get) => ({
       userAddress: DEMO_USER_ADDRESS,
       balance: 0,
+      balanceLoaded: false,
       wills: mockWills,
       lastViewedWillId: "AL-001",
       isConnected: false,
       isWorking: false,
       connectWallet: async () => {
-        set({ isWorking: true });
+        set({ isWorking: true, balanceLoaded: false });
         try {
           const { address } = await connectGenLayerWallet();
           set({
@@ -273,6 +287,7 @@ export const useAfterLifeStore = create<AfterLifeState>()(
 
           set({
             balance,
+            balanceLoaded: true,
             wills: nextWills,
             lastViewedWillId: liveWillIds[0] || get().lastViewedWillId,
           });
@@ -313,7 +328,27 @@ export const useAfterLifeStore = create<AfterLifeState>()(
 
         set({ isWorking: true });
         try {
-          await claimStarterTokensOnChain();
+          // Guard: read live chain balance before sending tx to avoid
+          // "Already claimed starter tokens" reverts when the UI raced ahead
+          // of refreshOnChainState.
+          const liveBalance = await readBalance(get().userAddress);
+          if (liveBalance > 0) {
+            set({ balance: liveBalance, balanceLoaded: true });
+            return;
+          }
+
+          try {
+            await claimStarterTokensOnChain();
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            if (/already\s*claimed/i.test(message)) {
+              // Someone else (another tab, retry, prior session) already claimed.
+              // Treat as success — just refresh and return.
+              await get().refreshOnChainState();
+              return;
+            }
+            throw new Error(friendlyClaimError(message));
+          }
           await get().refreshOnChainState();
         } finally {
           set({ isWorking: false });

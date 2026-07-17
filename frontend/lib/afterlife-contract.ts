@@ -36,6 +36,36 @@ export interface OnChainWillState {
   will_number: number;
 }
 
+function extractRevertReason(receipt: unknown): string | null {
+  // GenLayer receipts nest the revert message inside consensus_data / votes /
+  // execution results. Scrape the JSON string for the first user-facing message
+  // instead of dumping the whole envelope back to the UI.
+  try {
+    const dump = JSON.stringify(receipt);
+    const patterns: RegExp[] = [
+      /UserError[^"]*"([^"\\]+)"/i,
+      /"error"\s*:\s*"([^"\\]+)"/i,
+      /"message"\s*:\s*"([^"\\]+)"/i,
+      /"reason"\s*:\s*"([^"\\]+)"/i,
+      /Insufficient[^"\\]*/i,
+      /Already[^"\\]*/i,
+      /Only[^"\\]*/i,
+      /Invalid[^"\\]*/i,
+      /Unknown[^"\\]*/i,
+      /Grace period[^"\\]*/i,
+    ];
+    for (const pattern of patterns) {
+      const match = dump.match(pattern);
+      if (match) {
+        return match[1] ?? match[0];
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
 async function waitForSuccessfulWrite(txHash: `0x${string}`) {
   const readClient = createReadClient();
   const receipt = await readClient.waitForTransactionReceipt({
@@ -47,7 +77,11 @@ async function waitForSuccessfulWrite(txHash: `0x${string}`) {
 
   if (receipt.txExecutionResultName !== ExecutionResult.FINISHED_WITH_RETURN) {
     console.error("GenLayer transaction execution failed, receipt:", receipt);
-    throw new Error(`The transaction finalized, but contract execution did not succeed. Details: ${JSON.stringify(receipt)}`);
+    const revertReason = extractRevertReason(receipt);
+    const suffix = revertReason ? ` Reason: ${revertReason}` : "";
+    throw new Error(
+      `The transaction finalized, but contract execution did not succeed.${suffix}`,
+    );
   }
 
   return receipt;

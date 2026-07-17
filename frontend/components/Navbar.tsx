@@ -2,14 +2,15 @@
 
 import Link from "next/link";
 import { HeartHandshake, ShieldCheck } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { useAfterLifeStore } from "@/lib/store";
-import { shortenAddress } from "@/lib/address";
+import { shortenAddress, normalizeAddress } from "@/lib/address";
 
 export function Navbar() {
   const balance = useAfterLifeStore((state) => state.balance);
+  const balanceLoaded = useAfterLifeStore((state) => state.balanceLoaded);
   const address = useAfterLifeStore((state) => state.userAddress);
   const isConnected = useAfterLifeStore((state) => state.isConnected);
   const isWorking = useAfterLifeStore((state) => state.isWorking);
@@ -38,6 +39,56 @@ export function Navbar() {
       setIsPending(false);
     }
   }
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const provider = window.ethereum as
+      | {
+          on?: (event: string, handler: (...args: unknown[]) => void) => void;
+          removeListener?: (event: string, handler: (...args: unknown[]) => void) => void;
+        }
+      | undefined;
+    if (!provider?.on) return;
+
+    const handleAccountsChanged = (...args: unknown[]) => {
+      const accounts = (args[0] as string[] | undefined) ?? [];
+      const next = accounts[0];
+      // Reset store state on account switch/disconnect so the header stops
+      // showing a stale balance for a wallet the user no longer controls.
+      if (!next) {
+        useAfterLifeStore.setState({
+          isConnected: false,
+          balance: 0,
+          balanceLoaded: false,
+        });
+        return;
+      }
+      const normalized = normalizeAddress(next);
+      if (normalized !== useAfterLifeStore.getState().userAddress) {
+        useAfterLifeStore.setState({
+          userAddress: normalized,
+          balance: 0,
+          balanceLoaded: false,
+        });
+        useAfterLifeStore.getState().refreshOnChainState().catch(() => {});
+      }
+    };
+
+    const handleChainChanged = () => {
+      // Chain switches invalidate our contract read cache.
+      useAfterLifeStore.setState({ balanceLoaded: false });
+      if (useAfterLifeStore.getState().isConnected) {
+        useAfterLifeStore.getState().refreshOnChainState().catch(() => {});
+      }
+    };
+
+    provider.on("accountsChanged", handleAccountsChanged);
+    provider.on("chainChanged", handleChainChanged);
+    return () => {
+      provider.removeListener?.("accountsChanged", handleAccountsChanged);
+      provider.removeListener?.("chainChanged", handleChainChanged);
+    };
+  }, []);
 
   return (
     <header className="sticky top-0 z-40 border-b border-white/5 bg-midnight/70 backdrop-blur-xl">
@@ -79,14 +130,14 @@ export function Navbar() {
 
         {isConnected ? (
           <div className="flex items-center gap-3">
-            {balance === 0 ? (
+            {balanceLoaded && balance === 0 ? (
               <Button variant="secondary" size="sm" onClick={handleClaim} disabled={isPending || isWorking}>
                 {isPending || isWorking ? "Claiming…" : "Claim 200 LIFE"}
               </Button>
             ) : null}
             <div className="flex items-center gap-3 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-xs text-white/70">
               <HeartHandshake className="h-4 w-4 text-gold" />
-              <span>{balance} LIFE</span>
+              <span>{balanceLoaded ? `${balance} LIFE` : "… LIFE"}</span>
               <span className="hidden text-white/40 md:inline">{shortenAddress(address)}</span>
             </div>
           </div>
