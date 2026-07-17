@@ -12,6 +12,7 @@ import { Progress } from "@/components/ui/progress";
 import { Textarea } from "@/components/ui/textarea";
 import type { Beneficiary, DigitalAsset } from "@/lib/mockWills";
 import { useAfterLifeStore } from "@/lib/store";
+import { readRecipientPublicKey } from "@/lib/afterlife-contract";
 
 const steps = [
   "Identity",
@@ -23,10 +24,15 @@ const steps = [
   "Review & sign",
 ];
 
+const HEX_ADDRESS = /^0x[0-9a-fA-F]{40}$/;
+const CREATION_FEE = 10;
+
 export default function CreateWillPage() {
   const router = useRouter();
   const createWill = useAfterLifeStore((state) => state.createWill);
   const isConnected = useAfterLifeStore((state) => state.isConnected);
+  const balance = useAfterLifeStore((state) => state.balance);
+  const balanceLoaded = useAfterLifeStore((state) => state.balanceLoaded);
 
   const [step, setStep] = useState(0);
   const [isSealing, setIsSealing] = useState(false);
@@ -72,26 +78,115 @@ export default function CreateWillPage() {
   );
 
   const canAdvance = useMemo(() => {
-    if (step === 0) return identity.ownerName.trim() && identity.ownerCity.trim();
-    if (step === 2) return beneficiaries.length > 0 && totalShare === 100;
+    if (step === 0) {
+      return Boolean(
+        identity.ownerName.trim() &&
+          identity.ownerCity.trim() &&
+          Number.isInteger(identity.ownerBirthYear) &&
+          identity.ownerBirthYear >= 1900 &&
+          identity.ownerBirthYear <= 2026,
+      );
+    }
+    if (step === 2) {
+      if (beneficiaries.length === 0 || totalShare !== 100) return false;
+      return beneficiaries.every(
+        (beneficiary) =>
+          beneficiary.name.trim() && HEX_ADDRESS.test(beneficiary.address.trim()),
+      );
+    }
     return true;
-  }, [beneficiaries.length, identity.ownerCity, identity.ownerName, step, totalShare]);
+  }, [
+    beneficiaries,
+    identity.ownerBirthYear,
+    identity.ownerCity,
+    identity.ownerName,
+    step,
+    totalShare,
+  ]);
 
   const next = () => setStep((current) => Math.min(current + 1, steps.length - 1));
   const back = () => setStep((current) => Math.max(current - 1, 0));
 
+  const validate = (): string | null => {
+    if (!identity.ownerName.trim()) return "Owner full name is required.";
+    if (!identity.ownerCity.trim()) return "Owner city is required.";
+    if (
+      !Number.isInteger(identity.ownerBirthYear) ||
+      identity.ownerBirthYear < 1900 ||
+      identity.ownerBirthYear > 2026
+    ) {
+      return "Owner birth year must be between 1900 and 2026.";
+    }
+    if (![30, 60, 90].includes(cadenceDays)) {
+      return "Check-in cadence must be 30, 60, or 90 days.";
+    }
+    if (beneficiaries.length === 0) {
+      return "Add at least one beneficiary.";
+    }
+    for (const beneficiary of beneficiaries) {
+      if (!beneficiary.name.trim()) return "Every beneficiary needs a name.";
+      if (!HEX_ADDRESS.test(beneficiary.address.trim())) {
+        return `Beneficiary ${beneficiary.name || beneficiary.address} has an invalid wallet address.`;
+      }
+    }
+    if (totalShare !== 100) {
+      return `Beneficiary shares must total 100. Currently ${totalShare}.`;
+    }
+    for (const message of messages) {
+      if (!HEX_ADDRESS.test((message.recipientAddress ?? "").trim())) {
+        return `Final message recipient address is invalid: ${message.recipientAddress}`;
+      }
+      if (!message.body.trim()) {
+        return "Final messages cannot be empty.";
+      }
+    }
+    if (isConnected && balanceLoaded && balance < CREATION_FEE) {
+      return `You need at least ${CREATION_FEE} LIFE to seal a will. Current balance: ${balance}.`;
+    }
+    return null;
+  };
+
   const handleSeal = async () => {
+    const validationError = validate();
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
     try {
       setIsSealing(true);
       setError(null);
+
+      if (isConnected && messages.length > 0) {
+        const unique = Array.from(
+          new Set(messages.map((m) => m.recipientAddress.trim().toLowerCase())),
+        );
+        for (const recipient of unique) {
+          const pubKey = await readRecipientPublicKey(recipient);
+          if (!pubKey || pubKey.trim() === "") {
+            setError(
+              `Recipient ${recipient} has not registered a public key. Ask them to visit /register-key first, or remove their final message before sealing.`,
+            );
+            setIsSealing(false);
+            return;
+          }
+        }
+      }
+
       const willId = await createWill({
-        ownerName: identity.ownerName,
+        ownerName: identity.ownerName.trim(),
         ownerBirthYear: identity.ownerBirthYear,
-        ownerCity: identity.ownerCity,
+        ownerCity: identity.ownerCity.trim(),
         cadenceDays,
-        beneficiaries,
+        beneficiaries: beneficiaries.map((beneficiary) => ({
+          ...beneficiary,
+          address: beneficiary.address.trim().toLowerCase(),
+          name: beneficiary.name.trim(),
+        })),
         assets,
-        finalMessages: messages,
+        finalMessages: messages.map((message) => ({
+          ...message,
+          recipientAddress: message.recipientAddress.trim().toLowerCase(),
+        })),
         socialLinks: socialLinks.filter(Boolean),
       });
       await new Promise((resolve) => setTimeout(resolve, 1200));
@@ -537,6 +632,12 @@ export default function CreateWillPage() {
               </div>
             ) : null}
 
+            {step === steps.length - 1 && isConnected && balanceLoaded && balance < CREATION_FEE ? (
+              <div className="mt-6 rounded-[1.5rem] border border-alert/35 bg-alert/15 p-4 text-sm text-rose-100">
+                You need at least {CREATION_FEE} LIFE to seal a will. Current balance: {balance}. Claim starter tokens from the header first.
+              </div>
+            ) : null}
+
             <div className="mt-8 flex justify-between gap-4">
               <Button variant="secondary" onClick={back} disabled={step === 0 || isSealing}>
                 Back
@@ -546,7 +647,13 @@ export default function CreateWillPage() {
                   Continue
                 </Button>
               ) : (
-                <Button onClick={handleSeal} disabled={isSealing}>
+                <Button
+                  onClick={handleSeal}
+                  disabled={
+                    isSealing ||
+                    (isConnected && balanceLoaded && balance < CREATION_FEE)
+                  }
+                >
                   {isSealing ? (
                     <>
                       <Feather className="mr-2 h-4 w-4 animate-pulse" />

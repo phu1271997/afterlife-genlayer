@@ -37,33 +37,56 @@ export interface OnChainWillState {
 }
 
 function extractRevertReason(receipt: unknown): string | null {
-  // GenLayer receipts nest the revert message inside consensus_data / votes /
-  // execution results. Scrape the JSON string for the first user-facing message
-  // instead of dumping the whole envelope back to the UI.
+  // GenLayer receipts nest the UserError message inside
+  // consensus_data.leader_receipt[i].error (string|null). Read the typed field
+  // first, then fall back to a JSON scrape for older shapes.
+  try {
+    const r = receipt as {
+      consensus_data?: {
+        leader_receipt?: Array<{ error?: string | null }>;
+      };
+    };
+    const leaderReceipts = r?.consensus_data?.leader_receipt ?? [];
+    for (const entry of leaderReceipts) {
+      const raw = entry?.error;
+      if (!raw || typeof raw !== "string") continue;
+      const cleaned = cleanReceiptError(raw);
+      if (cleaned) return cleaned;
+    }
+  } catch {
+    /* ignore */
+  }
+
   try {
     const dump = JSON.stringify(receipt);
+    // Match a UserError anywhere in the dump, e.g. `UserError("Only will owner
+    // can add messages")` or JSON-encoded variants. Prefer longer, punctuated
+    // messages so we don't return a stray 4-char match like "only".
     const patterns: RegExp[] = [
-      /UserError[^"]*"([^"\\]+)"/i,
-      /"error"\s*:\s*"([^"\\]+)"/i,
-      /"message"\s*:\s*"([^"\\]+)"/i,
-      /"reason"\s*:\s*"([^"\\]+)"/i,
-      /Insufficient[^"\\]*/i,
-      /Already[^"\\]*/i,
-      /Only[^"\\]*/i,
-      /Invalid[^"\\]*/i,
-      /Unknown[^"\\]*/i,
-      /Grace period[^"\\]*/i,
+      /UserError\(\s*[\\"']*([^"'\\)]{4,})/i,
+      /"error"\s*:\s*"([^"\\]{4,})"/i,
+      /"message"\s*:\s*"([^"\\]{4,})"/i,
+      /"reason"\s*:\s*"([^"\\]{4,})"/i,
     ];
     for (const pattern of patterns) {
       const match = dump.match(pattern);
-      if (match) {
-        return match[1] ?? match[0];
+      if (match?.[1]) {
+        return match[1].trim();
       }
     }
   } catch {
     /* ignore */
   }
   return null;
+}
+
+function cleanReceiptError(raw: string): string {
+  // Genvm sometimes wraps the message as `UserError("actual text")` or
+  // `Rollback("actual text")`. Peel that outer layer so the UI shows the
+  // actual message.
+  const wrapper = raw.match(/^\s*(?:UserError|Rollback|Error)\(\s*["']?(.*?)["']?\s*\)\s*$/i);
+  if (wrapper?.[1]) return wrapper[1].trim();
+  return raw.trim();
 }
 
 async function waitForSuccessfulWrite(txHash: `0x${string}`) {
