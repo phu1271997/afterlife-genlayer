@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Check, Feather, Plus, ScrollText } from "lucide-react";
 
@@ -31,6 +31,7 @@ export default function CreateWillPage() {
   const router = useRouter();
   const createWill = useAfterLifeStore((state) => state.createWill);
   const isConnected = useAfterLifeStore((state) => state.isConnected);
+  const userAddress = useAfterLifeStore((state) => state.userAddress);
   const balance = useAfterLifeStore((state) => state.balance);
   const balanceLoaded = useAfterLifeStore((state) => state.balanceLoaded);
 
@@ -71,6 +72,25 @@ export default function CreateWillPage() {
     },
   ]);
   const [socialLinks, setSocialLinks] = useState<string[]>(["https://x.com/"]);
+
+  useEffect(() => {
+    if (isConnected && userAddress) {
+      setBeneficiaries((prev) =>
+        prev.map((b) =>
+          b.address.toLowerCase() === "0x3af9d4e70000000000000000000000000000b001"
+            ? { ...b, address: userAddress, name: b.name === "Sarah Mercer" ? `${b.name} (You)` : b.name }
+            : b
+        )
+      );
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.recipientAddress.toLowerCase() === "0x3af9d4e70000000000000000000000000000b001"
+            ? { ...m, recipientAddress: userAddress, recipientName: m.recipientName === "Sarah Mercer" ? `${m.recipientName} (You)` : m.recipientName }
+            : m
+        )
+      );
+    }
+  }, [isConnected, userAddress]);
 
   const totalShare = useMemo(
     () => beneficiaries.reduce((sum, beneficiary) => sum + Number(beneficiary.share || 0), 0),
