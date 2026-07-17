@@ -81,7 +81,7 @@ export function Navbar() {
           <div className="flex items-center gap-3">
             {balance === 0 ? (
               <Button variant="secondary" size="sm" onClick={handleClaim} disabled={isPending || isWorking}>
-                Claim 200 LIFE
+                {isPending || isWorking ? "Claiming…" : "Claim 200 LIFE"}
               </Button>
             ) : null}
             <div className="flex items-center gap-3 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-xs text-white/70">

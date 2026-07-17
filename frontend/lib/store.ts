@@ -231,7 +231,7 @@ export const useAfterLifeStore = create<AfterLifeState>()(
   persist(
     (set, get) => ({
       userAddress: DEMO_USER_ADDRESS,
-      balance: 200,
+      balance: 0,
       wills: mockWills,
       lastViewedWillId: "AL-001",
       isConnected: false,
@@ -306,10 +306,9 @@ export const useAfterLifeStore = create<AfterLifeState>()(
       },
       claimStarterTokens: async () => {
         if (!get().isConnected) {
-          set((state) => ({
-            balance: state.balance > 0 ? state.balance : 200,
-          }));
-          return;
+          throw new Error(
+            "Connect your wallet before claiming LIFE tokens. The starter grant is written on-chain to your address.",
+          );
         }
 
         set({ isWorking: true });
@@ -627,7 +626,6 @@ export const useAfterLifeStore = create<AfterLifeState>()(
       storage: createJSONStorage(getStorage),
       partialize: (state) => ({
         userAddress: state.userAddress,
-        balance: state.balance,
         wills: state.wills,
         lastViewedWillId: state.lastViewedWillId,
       }),
