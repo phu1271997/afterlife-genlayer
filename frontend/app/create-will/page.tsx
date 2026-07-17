@@ -12,7 +12,12 @@ import { Progress } from "@/components/ui/progress";
 import { Textarea } from "@/components/ui/textarea";
 import type { Beneficiary, DigitalAsset } from "@/lib/mockWills";
 import { useAfterLifeStore } from "@/lib/store";
-import { readRecipientPublicKey } from "@/lib/afterlife-contract";
+import {
+  readRecipientPublicKey,
+  registerRecipientPublicKeyOnChain,
+} from "@/lib/afterlife-contract";
+import { getOrCreateECDHKeypair } from "@/lib/encryption";
+import { addressEquals } from "@/lib/address";
 
 const steps = [
   "Identity",
@@ -176,19 +181,47 @@ export default function CreateWillPage() {
       setIsSealing(true);
       setError(null);
 
+      let effectiveMessages = messages;
       if (isConnected && messages.length > 0) {
         const unique = Array.from(
           new Set(messages.map((m) => m.recipientAddress.trim().toLowerCase())),
         );
+        const unregisteredExternal: string[] = [];
         for (const recipient of unique) {
           const pubKey = await readRecipientPublicKey(recipient);
-          if (!pubKey || pubKey.trim() === "") {
-            setError(
-              `Recipient ${recipient} has not registered a public key. Ask them to visit /register-key first, or remove their final message before sealing.`,
-            );
-            setIsSealing(false);
-            return;
+          if (pubKey && pubKey.trim() !== "") continue;
+
+          // Auto-register the connected wallet's own key so a first-time user
+          // can seal a self-addressed message without a manual detour to
+          // /register-key. External recipients still need to register from
+          // their own browser — we cannot sign a tx on their behalf.
+          if (addressEquals(recipient, userAddress)) {
+            const { publicKeyHex } = await getOrCreateECDHKeypair(userAddress);
+            if (!publicKeyHex) {
+              setError(
+                "Could not generate an encryption key in this browser. Try a different browser or unblock crypto.subtle.",
+              );
+              setIsSealing(false);
+              return;
+            }
+            await registerRecipientPublicKeyOnChain(publicKeyHex);
+          } else {
+            unregisteredExternal.push(recipient);
           }
+        }
+
+        if (unregisteredExternal.length > 0) {
+          // Drop messages for recipients we cannot auto-register so the will
+          // still gets created. Notify the user so they can follow up.
+          const dropped = new Set(unregisteredExternal);
+          effectiveMessages = messages.filter(
+            (m) => !dropped.has(m.recipientAddress.trim().toLowerCase()),
+          );
+          setError(
+            `Skipped sealed messages for unregistered recipients: ${unregisteredExternal.join(
+              ", ",
+            )}. Ask them to register a key at /register-key, then add the messages later.`,
+          );
         }
       }
 
@@ -203,7 +236,7 @@ export default function CreateWillPage() {
           name: beneficiary.name.trim(),
         })),
         assets,
-        finalMessages: messages.map((message) => ({
+        finalMessages: effectiveMessages.map((message) => ({
           ...message,
           recipientAddress: message.recipientAddress.trim().toLowerCase(),
         })),
