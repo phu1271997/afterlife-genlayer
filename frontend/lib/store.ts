@@ -36,6 +36,13 @@ export interface CreateWillInput {
   socialLinks: string[];
 }
 
+export interface CreateWillResult {
+  willId: string;
+  mode: "on-chain" | "demo-fallback" | "demo";
+  warnings: string[];
+  fallbackReason?: string;
+}
+
 interface AfterLifeState {
   userAddress: string;
   balance: number;
@@ -48,7 +55,7 @@ interface AfterLifeState {
   refreshOnChainState: () => Promise<void>;
   loadWillById: (willId: string) => Promise<WillRecord | null>;
   claimStarterTokens: () => Promise<void>;
-  createWill: (input: CreateWillInput) => Promise<string>;
+  createWill: (input: CreateWillInput) => Promise<CreateWillResult>;
   proofOfLife: (willId: string) => Promise<void>;
   triggerVerification: (
     willId: string,
@@ -355,59 +362,20 @@ export const useAfterLifeStore = create<AfterLifeState>()(
         }
       },
       createWill: async (input) => {
-        if (!get().isConnected) {
-          const id = `AL-${String(get().wills.length + 1).padStart(3, "0")}`;
+        const buildLocalWill = (
+          willId: string,
+          label: string,
+          detail: string,
+        ): WillRecord => {
           const now = new Date();
           const next = new Date(now.getTime() + input.cadenceDays * 24 * 60 * 60 * 1000);
-          const newWill: WillRecord = {
-            id,
-            title: `${input.ownerName.split(" ")[0]}'s Digital Will`,
-            ownerName: input.ownerName,
-            ownerBirthYear: input.ownerBirthYear,
-            ownerCity: input.ownerCity,
-            ownerAddress: get().userAddress,
-            cadenceDays: input.cadenceDays,
-            createdAt: now.toISOString(),
-            lastCheckIn: now.toISOString(),
-            nextCheckIn: next.toISOString(),
-            status: "ACTIVE",
-            beneficiaries: input.beneficiaries,
-            assets: input.assets,
-            finalMessages: input.finalMessages.map((message, index) => ({
-              ...message,
-              id: `${id}-msg-${index + 1}`,
-              sealedAt: now.toISOString(),
-            })),
-            socialLinks: input.socialLinks,
-            activity: [
-              {
-                id: `${id}-created`,
-                date: now.toISOString(),
-                label: "Will created",
-                detail: "A new digital will was sealed and recorded for future execution.",
-              },
-            ],
-          };
-          set((state) => ({
-            balance: Math.max(state.balance - 10, 0),
-            wills: [newWill, ...state.wills],
-            lastViewedWillId: id,
-          }));
-          return id;
-        }
-
-        set({ isWorking: true });
-        try {
-          const { willId, ownerAddress } = await createWillOnChain(input);
-          const now = new Date();
-          const next = new Date(now.getTime() + input.cadenceDays * 24 * 60 * 60 * 1000);
-          const localWill: WillRecord = {
+          return {
             id: willId,
             title: `${input.ownerName.split(" ")[0]}'s Digital Will`,
             ownerName: input.ownerName,
             ownerBirthYear: input.ownerBirthYear,
             ownerCity: input.ownerCity,
-            ownerAddress,
+            ownerAddress: get().userAddress,
             cadenceDays: input.cadenceDays,
             createdAt: now.toISOString(),
             lastCheckIn: now.toISOString(),
@@ -425,19 +393,97 @@ export const useAfterLifeStore = create<AfterLifeState>()(
               {
                 id: `${willId}-created`,
                 date: now.toISOString(),
-                label: "Will created on GenLayer",
-                detail: "The will was written to the live AfterLife contract.",
+                label,
+                detail,
               },
             ],
           };
+        };
 
+        if (!get().isConnected) {
+          const id = `AL-DEMO-${Date.now().toString().slice(-6)}`;
+          const newWill = buildLocalWill(
+            id,
+            "Will created (demo mode)",
+            "Wallet is not connected — this will lives only in this browser as a preview.",
+          );
           set((state) => ({
-            wills: mergeWillRecord(localWill, state.wills),
-            lastViewedWillId: willId,
+            balance: Math.max(state.balance - 10, 0),
+            wills: [newWill, ...state.wills],
+            lastViewedWillId: id,
           }));
+          return { willId: id, mode: "demo", warnings: [] };
+        }
 
-          await get().refreshOnChainState();
-          return willId;
+        set({ isWorking: true });
+        try {
+          try {
+            const {
+              willId,
+              ownerAddress,
+              messageWarnings,
+            } = await createWillOnChain(input);
+            const now = new Date();
+            const next = new Date(now.getTime() + input.cadenceDays * 24 * 60 * 60 * 1000);
+            const localWill: WillRecord = {
+              id: willId,
+              title: `${input.ownerName.split(" ")[0]}'s Digital Will`,
+              ownerName: input.ownerName,
+              ownerBirthYear: input.ownerBirthYear,
+              ownerCity: input.ownerCity,
+              ownerAddress,
+              cadenceDays: input.cadenceDays,
+              createdAt: now.toISOString(),
+              lastCheckIn: now.toISOString(),
+              nextCheckIn: next.toISOString(),
+              status: "ACTIVE",
+              beneficiaries: input.beneficiaries,
+              assets: input.assets,
+              finalMessages: input.finalMessages.map((message, index) => ({
+                ...message,
+                id: `${willId}-msg-${index + 1}`,
+                sealedAt: now.toISOString(),
+              })),
+              socialLinks: input.socialLinks,
+              activity: [
+                {
+                  id: `${willId}-created`,
+                  date: now.toISOString(),
+                  label: "Will created on GenLayer",
+                  detail: "The will was written to the live AfterLife contract.",
+                },
+              ],
+            };
+
+            set((state) => ({
+              wills: mergeWillRecord(localWill, state.wills),
+              lastViewedWillId: willId,
+            }));
+
+            await get().refreshOnChainState();
+            return { willId, mode: "on-chain", warnings: messageWarnings };
+          } catch (chainError) {
+            const reason =
+              chainError instanceof Error ? chainError.message : String(chainError);
+            console.error("createWillOnChain failed, falling back to demo:", chainError);
+
+            const id = `AL-DEMO-${Date.now().toString().slice(-6)}`;
+            const fallbackWill = buildLocalWill(
+              id,
+              "Will created (demo fallback)",
+              `The GenLayer transaction did not succeed, so the will is stored locally in this browser instead. Reason: ${reason}`,
+            );
+            set((state) => ({
+              wills: [fallbackWill, ...state.wills],
+              lastViewedWillId: id,
+            }));
+            return {
+              willId: id,
+              mode: "demo-fallback",
+              warnings: [],
+              fallbackReason: reason,
+            };
+          }
         } finally {
           set({ isWorking: false });
         }

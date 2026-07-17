@@ -182,50 +182,55 @@ export default function CreateWillPage() {
       setError(null);
 
       let effectiveMessages = messages;
+      const softWarnings: string[] = [];
       if (isConnected && messages.length > 0) {
         const unique = Array.from(
           new Set(messages.map((m) => m.recipientAddress.trim().toLowerCase())),
         );
         const unregisteredExternal: string[] = [];
         for (const recipient of unique) {
-          const pubKey = await readRecipientPublicKey(recipient);
-          if (pubKey && pubKey.trim() !== "") continue;
+          try {
+            const pubKey = await readRecipientPublicKey(recipient);
+            if (pubKey && pubKey.trim() !== "") continue;
 
-          // Auto-register the connected wallet's own key so a first-time user
-          // can seal a self-addressed message without a manual detour to
-          // /register-key. External recipients still need to register from
-          // their own browser — we cannot sign a tx on their behalf.
-          if (addressEquals(recipient, userAddress)) {
-            const { publicKeyHex } = await getOrCreateECDHKeypair(userAddress);
-            if (!publicKeyHex) {
-              setError(
-                "Could not generate an encryption key in this browser. Try a different browser or unblock crypto.subtle.",
-              );
-              setIsSealing(false);
-              return;
+            // Auto-register the connected wallet's own key so a first-time
+            // user can seal a self-addressed message without a manual detour
+            // to /register-key. External recipients still need to register
+            // from their own browser — we cannot sign a tx on their behalf.
+            if (addressEquals(recipient, userAddress)) {
+              const { publicKeyHex } = await getOrCreateECDHKeypair(userAddress);
+              if (!publicKeyHex) {
+                softWarnings.push(
+                  "Could not generate an encryption key in this browser; sealed messages will be skipped.",
+                );
+                unregisteredExternal.push(recipient);
+                continue;
+              }
+              await registerRecipientPublicKeyOnChain(publicKeyHex);
+            } else {
+              unregisteredExternal.push(recipient);
             }
-            await registerRecipientPublicKeyOnChain(publicKeyHex);
-          } else {
+          } catch (registrationError) {
+            const reason =
+              registrationError instanceof Error
+                ? registrationError.message
+                : String(registrationError);
+            softWarnings.push(
+              `Could not prepare encryption for ${recipient}: ${reason}`,
+            );
             unregisteredExternal.push(recipient);
           }
         }
 
         if (unregisteredExternal.length > 0) {
-          // Drop messages for recipients we cannot auto-register so the will
-          // still gets created. Notify the user so they can follow up.
           const dropped = new Set(unregisteredExternal);
           effectiveMessages = messages.filter(
             (m) => !dropped.has(m.recipientAddress.trim().toLowerCase()),
           );
-          setError(
-            `Skipped sealed messages for unregistered recipients: ${unregisteredExternal.join(
-              ", ",
-            )}. Ask them to register a key at /register-key, then add the messages later.`,
-          );
         }
       }
 
-      const willId = await createWill({
+      const result = await createWill({
         ownerName: identity.ownerName.trim(),
         ownerBirthYear: identity.ownerBirthYear,
         ownerCity: identity.ownerCity.trim(),
@@ -242,8 +247,24 @@ export default function CreateWillPage() {
         })),
         socialLinks: socialLinks.filter(Boolean),
       });
-      await new Promise((resolve) => setTimeout(resolve, 1200));
-      router.push(`/my-will?created=${willId}`);
+
+      const combinedWarnings = [...softWarnings, ...result.warnings];
+      if (result.mode === "demo-fallback") {
+        window.alert(
+          `The on-chain transaction did not succeed, so your will was saved locally in demo mode instead.\n\nReason: ${
+            result.fallbackReason ?? "unknown"
+          }`,
+        );
+      } else if (combinedWarnings.length > 0) {
+        window.alert(
+          `Will created${
+            result.mode === "on-chain" ? " on GenLayer" : ""
+          }, with warnings:\n\n- ${combinedWarnings.join("\n- ")}`,
+        );
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 800));
+      router.push(`/my-will?created=${result.willId}`);
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "Unable to create will.");
     } finally {

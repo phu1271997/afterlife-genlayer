@@ -207,7 +207,13 @@ export async function registerRecipientPublicKeyOnChain(publicKeyHex: string) {
   await waitForSuccessfulWrite(txHash);
 }
 
-export async function createWillOnChain(input: CreateWillInput) {
+export interface CreateWillOnChainResult {
+  willId: string;
+  ownerAddress: string;
+  messageWarnings: string[];
+}
+
+export async function createWillOnChain(input: CreateWillInput): Promise<CreateWillOnChainResult> {
   const { client, address } = await connectGenLayerWallet();
   const willId = `AL-${Date.now().toString().slice(-8)}`;
 
@@ -235,46 +241,51 @@ export async function createWillOnChain(input: CreateWillInput) {
 
   await waitForSuccessfulWrite(txHash);
 
+  // The core will already exists on-chain. Message failures below MUST NOT
+  // throw, or the caller loses the 10 LIFE creation fee with nothing to show.
+  const messageWarnings: string[] = [];
   for (const message of input.finalMessages) {
-    // REQUIRED: client-side ECIES encryption — contract rejects non-ENC:v2: payloads
-    const recipientPubKey = await readRecipientPublicKey(message.recipientAddress);
-    if (!recipientPubKey || recipientPubKey.trim() === "") {
-      throw new Error(
-        `Recipient ${message.recipientAddress} has not registered a public key. ` +
-          "They must visit /register-key before you can seal an encrypted final message."
-      );
-    }
-
-    let encryptedBody: string;
     try {
-      encryptedBody = await encryptMessageForRecipient(message.body, recipientPubKey);
+      const recipientPubKey = await readRecipientPublicKey(message.recipientAddress);
+      if (!recipientPubKey || recipientPubKey.trim() === "") {
+        messageWarnings.push(
+          `Skipped sealed message for ${message.recipientAddress}: recipient has not registered a public key.`,
+        );
+        continue;
+      }
+
+      const encryptedBody = await encryptMessageForRecipient(message.body, recipientPubKey);
+      if (!encryptedBody.startsWith("ENC:v2:")) {
+        messageWarnings.push(
+          `Skipped sealed message for ${message.recipientAddress}: encryption produced an invalid envelope.`,
+        );
+        continue;
+      }
+
+      const messageHash = await client.writeContract({
+        address: AFTERLIFE_CONTRACT_ADDRESS,
+        functionName: "add_final_message",
+        args: [
+          willId,
+          message.recipientAddress.toLowerCase(),
+          encryptedBody,
+          message.mediaUrl ?? "",
+        ],
+        value: BigInt(0),
+      });
+      await waitForSuccessfulWrite(messageHash);
     } catch (err) {
-      throw new Error(
-        `Failed to encrypt final message for ${message.recipientAddress}: ` +
-          (err instanceof Error ? err.message : String(err))
+      const reason = err instanceof Error ? err.message : String(err);
+      messageWarnings.push(
+        `Skipped sealed message for ${message.recipientAddress}: ${reason}`,
       );
     }
-    if (!encryptedBody.startsWith("ENC:v2:")) {
-      throw new Error("Encryption produced an invalid envelope (expected ENC:v2:…).");
-    }
-
-    const messageHash = await client.writeContract({
-      address: AFTERLIFE_CONTRACT_ADDRESS,
-      functionName: "add_final_message",
-      args: [
-        willId,
-        message.recipientAddress.toLowerCase(),
-        encryptedBody,
-        message.mediaUrl ?? "",
-      ],
-      value: BigInt(0),
-    });
-    await waitForSuccessfulWrite(messageHash);
   }
 
   return {
     willId,
     ownerAddress: address,
+    messageWarnings,
   };
 }
 
